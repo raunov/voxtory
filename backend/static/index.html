@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Voxtory API Test</title>
+    <style>
+        body { 
+            font-family: Arial, sans-serif; 
+            max-width: 800px; 
+            margin: 0 auto; 
+            padding: 20px; 
+            line-height: 1.6;
+        }
+        h1, h2 { color: #333; }
+        .container {
+            border: 1px solid #e0e0e0;
+            border-radius: 5px;
+            padding: 20px;
+            margin-bottom: 20px;
+            background-color: #f9f9f9;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        input[type="text"], 
+        input[type="file"] {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        button {
+            background: #4285f4;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        button:hover {
+            background: #3367d6;
+        }
+        pre {
+            background: #f4f4f4;
+            padding: 15px;
+            border-radius: 4px;
+            overflow: auto;
+            max-height: 500px;
+        }
+        .loading {
+            display: none;
+            text-align: center;
+            margin: 20px 0;
+        }
+        .error {
+            color: #d32f2f;
+            background: #ffebee;
+            padding: 10px;
+            border-radius: 4px;
+            margin-bottom: 15px;
+            display: none;
+        }
+        .token-status {
+            font-weight: bold;
+            margin-top: 5px;
+        }
+        .valid-token {
+            color: green;
+        }
+        .invalid-token {
+            color: red;
+        }
+        .radio-group {
+            margin-bottom: 10px;
+        }
+        .polling-status {
+            background: #e3f2fd;
+            padding: 15px;
+            border-radius: 4px;
+            margin-top: 20px;
+        }
+        .progress-container {
+            background: #ddd;
+            border-radius: 5px;
+            height: 10px;
+            width: 100%;
+            margin: 15px 0;
+        }
+        .progress-bar {
+            height: 10px;
+            border-radius: 5px;
+            background: #4285f4;
+            width: 0%;
+            transition: width 0.5s;
+        }
+    </style>
+</head>
+<body>
+    <h1>Voxtory API Test</h1>
+
+    <div class="container">
+        <h2>API Authentication</h2>
+        <div class="form-group">
+            <label for="api-key">API Key:</label>
+            <input type="text" id="api-key" placeholder="Enter your API key">
+            <div class="token-status" id="token-status"></div>
+        </div>
+        <button id="verify-token">Verify Token</button>
+    </div>
+
+    <div class="container">
+        <h2>Upload Audio File</h2>
+        <div id="auth-error" class="error">Please enter a valid API key before uploading files.</div>
+        <form id="upload-form" enctype="multipart/form-data">
+            <div class="form-group">
+                <label for="audio-file">Audio File:</label>
+                <input type="file" id="audio-file" name="audiofile" accept="audio/*" required>
+                <small>Max file size: 200MB</small>
+            </div>
+            <div class="form-group">
+                <label>Processing Mode:</label>
+                <div class="radio-group">
+                    <input type="radio" id="sync-mode" name="process-mode" value="sync" checked>
+                    <label for="sync-mode">Synchronous (immediate response)</label>
+                    <br>
+                    <input type="radio" id="async-mode" name="process-mode" value="async">
+                    <label for="async-mode">Asynchronous (background processing with polling)</label>
+                </div>
+            </div>
+            <button type="submit" id="analyze-button">Analyze Audio</button>
+        </form>
+        
+        <div id="polling-status" class="polling-status" style="display: none;">
+            <p>Status: <span id="job-status">pending</span></p>
+            <p>Job ID: <span id="job-id"></span></p>
+            <div class="progress-container">
+                <div class="progress-bar"></div>
+            </div>
+            <p id="polling-message">Polling for results...</p>
+        </div>
+    </div>
+    
+    <div id="loading" class="loading">
+        <p>Processing audio file... This may take a few minutes depending on the file size.</p>
+    </div>
+    
+    <div class="container" id="result-container" style="display: none;">
+        <h2>Results</h2>
+        <pre id="result"></pre>
+    </div>
+    
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const apiKeyInput = document.getElementById('api-key');
+            const tokenStatus = document.getElementById('token-status');
+            const verifyTokenButton = document.getElementById('verify-token');
+            const uploadForm = document.getElementById('upload-form');
+            const authError = document.getElementById('auth-error');
+            const loadingDiv = document.getElementById('loading');
+            const resultContainer = document.getElementById('result-container');
+            const resultDiv = document.getElementById('result');
+            
+            // Check if API key exists in local storage
+            const savedApiKey = localStorage.getItem('voxtoryApiKey');
+            if (savedApiKey) {
+                apiKeyInput.value = savedApiKey;
+                verifyToken(savedApiKey);
+            }
+            
+            // Verify token button click
+            verifyTokenButton.addEventListener('click', function() {
+                const apiKey = apiKeyInput.value.trim();
+                if (!apiKey) {
+                    tokenStatus.textContent = 'Please enter an API key';
+                    tokenStatus.className = 'token-status invalid-token';
+                    return;
+                }
+                
+                verifyToken(apiKey);
+            });
+            
+            // Verify token function
+            function verifyToken(apiKey) {
+                tokenStatus.textContent = 'Verifying...';
+                tokenStatus.className = 'token-status';
+                
+                fetch('/api/status', {
+                    headers: {
+                        'X-API-Key': apiKey
+                    }
+                })
+                .then(response => {
+                    if (response.ok) {
+                        tokenStatus.textContent = 'Valid API key';
+                        tokenStatus.className = 'token-status valid-token';
+                        localStorage.setItem('voxtoryApiKey', apiKey);
+                        authError.style.display = 'none';
+                    } else {
+                        tokenStatus.textContent = 'Invalid API key';
+                        tokenStatus.className = 'token-status invalid-token';
+                        authError.style.display = 'block';
+                    }
+                    return response.json();
+                })
+                .catch(error => {
+                    tokenStatus.textContent = 'Error verifying API key: ' + error.message;
+                    tokenStatus.className = 'token-status invalid-token';
+                    authError.style.display = 'block';
+                });
+            }
+            
+            // Form submission
+            uploadForm.addEventListener('submit', function(e) {
+                e.preventDefault();
+                
+                const apiKey = apiKeyInput.value.trim();
+                if (!apiKey) {
+                    authError.style.display = 'block';
+                    return;
+                }
+                
+                const fileInput = document.getElementById('audio-file');
+                if (!fileInput.files[0]) {
+                    alert('Please select an audio file');
+                    return;
+                }
+                
+                const formData = new FormData();
+                formData.append('audiofile', fileInput.files[0]);
+                
+                // Show loading indicator
+                loadingDiv.style.display = 'block';
+                resultContainer.style.display = 'none';
+                resultDiv.textContent = '';
+                
+                // Hide polling status (will be shown only for async mode)
+                const pollingStatus = document.getElementById('polling-status');
+                pollingStatus.style.display = 'none';
+                
+                // Get selected mode
+                const isAsync = document.getElementById('async-mode').checked;
+                
+                if (isAsync) {
+                    // Use async API with polling
+                    submitAsyncRequest(formData, apiKey);
+                } else {
+                    // Use existing synchronous API
+                    submitSyncRequest(formData, apiKey);
+                }
+            });
+
+            // Submit synchronous request
+            function submitSyncRequest(formData, apiKey) {
+                fetch('/api/analyze', {
+                    method: 'POST',
+                    headers: {
+                        'X-API-Key': apiKey
+                    },
+                    body: formData
+                })
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('API Error: ' + response.status);
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    loadingDiv.style.display = 'none';
+                    resultContainer.style.display = 'block';
+                    
+                    // Display results
+                    displayResults(data);
+                })
+                .catch(error => {
+                    loadingDiv.style.display = 'none';
+                    resultContainer.style.display = 'block';
+                    resultDiv.textContent = 'Error: ' + error.message;
+                });
+            }
+
+            // Submit asynchronous request with polling
+            function submitAsyncRequest(formData, apiKey) {
+                const pollingStatus = document.getElementById('polling-status');
+                const jobStatusElement = document.getElementById('job-status');
+                const jobIdElement = document.getElementById('job-id');
+                const pollingMessage = document.getElementById('polling-message');
+                const progressBar = document.querySelector('.progress-bar');
+                
+                pollingStatus.style.display = 'block';
+                jobStatusElement.textContent = 'submitting...';
+                progressBar.style.width = '10%';
+                
+                // Submit job
+                fetch('/api/jobs', {
+                    method: 'POST',
+                    headers: {
+                        'X-API-Key': apiKey
+                    },
+                    body: formData
+                })
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('API Error: ' + response.status);
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    // Job created, start polling
+                    jobIdElement.textContent = data.job_id;
+                    jobStatusElement.textContent = data.status;
+                    progressBar.style.width = '20%';
+                    
+                    // Start polling
+                    pollJobStatus(data.job_id, apiKey);
+                })
+                .catch(error => {
+                    loadingDiv.style.display = 'none';
+                    pollingStatus.style.display = 'none';
+                    resultContainer.style.display = 'block';
+                    resultDiv.textContent = 'Error: ' + error.message;
+                });
+            }
+
+            // Poll job status until completion
+            function pollJobStatus(jobId, apiKey) {
+                const pollingStatus = document.getElementById('polling-status');
+                const jobStatusElement = document.getElementById('job-status');
+                const pollingMessage = document.getElementById('polling-message');
+                const progressBar = document.querySelector('.progress-bar');
+                
+                let pollCount = 0;
+                const maxPolls = 60; // Max polling attempts (5 minutes at 5-second intervals)
+                const pollInterval = 5000; // Poll every 5 seconds
+                
+                const pollTimer = setInterval(() => {
+                    pollCount++;
+                    pollingMessage.textContent = `Polling for results... (Attempt ${pollCount})`;
+                    
+                    // Calculate progress percentage (from 20% to 90%)
+                    const progressPercent = 20 + Math.min(70, (pollCount / maxPolls) * 70);
+                    progressBar.style.width = `${progressPercent}%`;
+                    
+                    fetch(`/api/jobs/${jobId}`, {
+                        headers: {
+                            'X-API-Key': apiKey
+                        }
+                    })
+                    .then(response => {
+                        if (!response.ok) {
+                            throw new Error('API Error: ' + response.status);
+                        }
+                        return response.json();
+                    })
+                    .then(data => {
+                        // Update status
+                        jobStatusElement.textContent = data.status;
+                        
+                        // Check if job is completed or failed
+                        if (data.status === 'completed' || data.status === 'failed') {
+                            clearInterval(pollTimer);
+                            loadingDiv.style.display = 'none';
+                            
+                            if (data.status === 'completed') {
+                                progressBar.style.width = '100%';
+                                pollingMessage.textContent = 'Processing complete!';
+                                
+                                // Display results
+                                resultContainer.style.display = 'block';
+                                displayResults(data);
+                            } else {
+                                progressBar.style.width = '100%';
+                                progressBar.style.backgroundColor = '#f44336'; // Red for error
+                                pollingMessage.textContent = 'Processing failed: ' + (data.error || 'Unknown error');
+                                
+                                // Display error
+                                resultContainer.style.display = 'block';
+                                resultDiv.textContent = 'Error: ' + (data.error || 'Job processing failed');
+                            }
+                        }
+                    })
+                    .catch(error => {
+                        jobStatusElement.textContent = 'error';
+                        pollingMessage.textContent = 'Error polling for status: ' + error.message;
+                        
+                        // Continue polling despite errors
+                        if (pollCount >= maxPolls) {
+                            clearInterval(pollTimer);
+                            loadingDiv.style.display = 'none';
+                            progressBar.style.backgroundColor = '#f44336'; // Red for error
+                            pollingMessage.textContent = 'Polling timed out after maximum attempts';
+                        }
+                    });
+                    
+                    // Stop polling after maximum attempts
+                    if (pollCount >= maxPolls) {
+                        clearInterval(pollTimer);
+                        loadingDiv.style.display = 'none';
+                        pollingMessage.textContent = 'Polling timed out after maximum attempts';
+                    }
+                }, pollInterval);
+            }
+
+            // Display formatted results
+            function displayResults(data) {
+                // Pretty format JSON if result is JSON
+                if (data.result && typeof data.result === 'string' && data.result.trim().startsWith('{')) {
+                    try {
+                        const jsonObj = JSON.parse(data.result);
+                        resultDiv.textContent = JSON.stringify(jsonObj, null, 2);
+                    } catch (e) {
+                        resultDiv.textContent = data.result;
+                    }
+                } else {
+                    resultDiv.textContent = data.result || JSON.stringify(data, null, 2);
+                }
+            }
+        });
+    </script>
+</body>
+</html>

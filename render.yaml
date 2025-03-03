@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: voxtory
+    env: docker
+    region: eu-central-1  # Frankfurt region for European deployments
+    plan: free  # Free instance under the Hobby plan
+    branch: main  # Deploy from the main branch
+    healthCheckPath: /api/health
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: RATE_LIMIT
+        value: 10
+      - key: LOG_LEVEL
+        value: INFO
+      - key: CORS_ORIGINS
+        sync: false  # Will need to be set manually in the Render dashboard
+        # Default: comma-separated list of allowed origins (e.g., https://yourdomain.com,https://app.yourdomain.com)
+      - key: GEMINI_API_KEY
+        sync: false  # This will be set manually in the Render dashboard
+      - key: API_TOKEN
+        generateValue: true  # Render will generate a secure random value
+    autoDeploy: false  # Disable auto-deploy for production
