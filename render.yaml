@@ -2,7 +2,7 @@ services:
   - type: web
     name: voxtory
     env: docker
-    region: eu-central-1  # Frankfurt region for European deployments
+    region: frankfurt  # Frankfurt region for European deployments
     plan: free  # Free instance under the Hobby plan
     branch: main  # Deploy from the main branch
     healthCheckPath: /api/health
