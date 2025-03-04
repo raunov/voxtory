@@ -408,16 +408,34 @@
 
             // Display formatted results
             function displayResults(data) {
-                // Pretty format JSON if result is JSON
-                if (data.result && typeof data.result === 'string' && data.result.trim().startsWith('{')) {
-                    try {
-                        const jsonObj = JSON.parse(data.result);
-                        resultDiv.textContent = JSON.stringify(jsonObj, null, 2);
-                    } catch (e) {
-                        resultDiv.textContent = data.result;
+                // Handle the result based on its type
+                if (data.result) {
+                    if (typeof data.result === 'object') {
+                        // If result is already a JSON object, format it nicely
+                        resultDiv.textContent = JSON.stringify(data.result, null, 2);
+                    } else if (typeof data.result === 'string') {
+                        // For backward compatibility - try to parse if it's a JSON string
+                        try {
+                            // Check if the string looks like JSON
+                            if (data.result.trim().startsWith('{') || data.result.trim().startsWith('[')) {
+                                const jsonObj = JSON.parse(data.result);
+                                resultDiv.textContent = JSON.stringify(jsonObj, null, 2);
+                            } else {
+                                // Plain text result
+                                resultDiv.textContent = data.result;
+                            }
+                        } catch (e) {
+                            // If parsing fails, display as plain text
+                            resultDiv.textContent = data.result;
+                            console.warn("Failed to parse result as JSON:", e);
+                        }
+                    } else {
+                        // For any other type, convert to string
+                        resultDiv.textContent = String(data.result);
                     }
                 } else {
-                    resultDiv.textContent = data.result || JSON.stringify(data, null, 2);
+                    // No result field, display entire response
+                    resultDiv.textContent = JSON.stringify(data, null, 2);
                 }
             }
         });
