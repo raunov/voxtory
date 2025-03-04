@@ -3,7 +3,7 @@ import tempfile
 import time
 from typing import Dict, Any, Optional
 
-from fastapi import FastAPI, File, UploadFile, Depends, HTTPException, status, BackgroundTasks
+from fastapi import FastAPI, File, UploadFile, Depends, HTTPException, status, BackgroundTasks, Form
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -12,6 +12,7 @@ from config import HOST, PORT, MAX_FILE_SIZE, logger, ENVIRONMENT, CORS_ORIGINS
 from auth import check_rate_limit
 from gemini_client import GeminiClient
 from job_store import JobStore
+from gdrive_utils import download_gdrive_file
 
 # Log startup information
 logger.info(f"Starting Voxtory API in {ENVIRONMENT} environment")
@@ -333,6 +334,139 @@ async def get_job_status(
         response["error"] = job["error"]
     
     return response
+
+@app.post("/api/analyze/gdrive")
+async def analyze_gdrive_audio(
+    file_id: str = Form(...),
+    api_key: str = Depends(check_rate_limit)
+) -> Dict[str, Any]:
+    """
+    Analyze an audio file from Google Drive using the Gemini API.
+    
+    This endpoint accepts a Google Drive file ID, downloads the file,
+    and sends it to the Gemini API for analysis.
+    
+    - **file_id**: The Google Drive file ID (required)
+    """
+    try:
+        # Download file from Google Drive
+        file_data, content_type, error = await download_gdrive_file(file_id)
+        
+        # Handle download errors
+        if error:
+            logger.error(f"Error downloading Google Drive file: {error}")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=error
+            )
+        
+        # Process the audio with Gemini API
+        filename = f"gdrive_{file_id}"
+        logger.info(f"Processing Google Drive audio file: {filename}, size: {len(file_data) / (1024 * 1024):.2f} MB")
+        analysis_result = gemini_client.analyze_audio(file_data, content_type)
+        
+        # Check for errors
+        if "error" in analysis_result:
+            logger.error(f"Error from Gemini API: {analysis_result['error']}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=analysis_result['error']
+            )
+        
+        # Return result
+        return analysis_result
+        
+    except Exception as e:
+        # Handle exceptions not caught by specific handlers
+        if isinstance(e, HTTPException):
+            raise e
+        
+        logger.error(f"Error processing Google Drive file: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error processing request: {str(e)}"
+        )
+
+@app.post("/api/jobs/gdrive")
+async def create_gdrive_analysis_job(
+    background_tasks: BackgroundTasks,
+    file_id: str = Form(...),
+    api_key: str = Depends(check_rate_limit)
+) -> Dict[str, Any]:
+    """
+    Create a new asynchronous audio analysis job for a Google Drive file.
+    
+    This endpoint accepts a Google Drive file ID, downloads the file,
+    and starts processing in the background. It returns a job ID that
+    can be used to check the status and retrieve results later.
+    
+    - **file_id**: The Google Drive file ID (required)
+    """
+    temp_file_path = None
+    try:
+        # Download file from Google Drive
+        file_data, content_type, error = await download_gdrive_file(file_id)
+        
+        # Handle download errors
+        if error:
+            logger.error(f"Error downloading Google Drive file: {error}")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=error
+            )
+        
+        # Store in temporary file
+        with tempfile.NamedTemporaryFile(delete=False) as temp_file:
+            temp_file.write(file_data)
+            temp_file_path = temp_file.name
+        
+        # Create a job
+        filename = f"gdrive_{file_id}"
+        file_size = len(file_data)
+        
+        job_id = job_store.create_job(
+            file_path=temp_file_path,
+            filename=filename,
+            content_type=content_type,
+            file_size=file_size,
+            source="gdrive",
+            gdrive_id=file_id
+        )
+        
+        # Start background task
+        background_tasks.add_task(
+            process_audio_job,
+            job_id=job_id,
+            file_path=temp_file_path,
+            content_type=content_type
+        )
+        
+        logger.info(f"Created job {job_id} for Google Drive file: {file_id}")
+        
+        return {
+            "job_id": job_id,
+            "status": "pending",
+            "message": "Job created successfully",
+            "check_url": f"/api/jobs/{job_id}"
+        }
+        
+    except Exception as e:
+        # Clean up temp file if job creation fails
+        if temp_file_path and os.path.exists(temp_file_path):
+            try:
+                os.unlink(temp_file_path)
+            except Exception as cleanup_error:
+                logger.error(f"Error cleaning up temporary file: {cleanup_error}")
+        
+        # Handle exceptions not caught by specific handlers
+        if isinstance(e, HTTPException):
+            raise e
+            
+        logger.error(f"Error creating job for Google Drive file: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error creating job: {str(e)}"
+        )
 
 @app.exception_handler(Exception)
 async def generic_exception_handler(request, exc):

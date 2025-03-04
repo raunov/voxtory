@@ -118,11 +118,29 @@
         <h2>Upload Audio File</h2>
         <div id="auth-error" class="error">Please enter a valid API key before uploading files.</div>
         <form id="upload-form" enctype="multipart/form-data">
-            <div class="form-group">
+<div class="form-group">
+                <label>Input Source:</label>
+                <div class="radio-group">
+                    <input type="radio" id="upload-mode" name="input-mode" value="upload" checked>
+                    <label for="upload-mode">Upload Audio File</label>
+                    <br>
+                    <input type="radio" id="gdrive-mode" name="input-mode" value="gdrive">
+                    <label for="gdrive-mode">Google Drive File ID</label>
+                </div>
+            </div>
+            
+            <div id="upload-container" class="form-group">
                 <label for="audio-file">Audio File:</label>
-                <input type="file" id="audio-file" name="audiofile" accept="audio/*" required>
+                <input type="file" id="audio-file" name="audiofile" accept="audio/*">
                 <small>Max file size: 200MB</small>
             </div>
+            
+            <div id="gdrive-container" class="form-group" style="display: none;">
+                <label for="gdrive-id">Google Drive File ID:</label>
+                <input type="text" id="gdrive-id" name="file_id" placeholder="Enter Google Drive file ID">
+                <small>File must be publicly accessible</small>
+            </div>
+            
             <div class="form-group">
                 <label>Processing Mode:</label>
                 <div class="radio-group">
@@ -165,6 +183,17 @@
             const loadingDiv = document.getElementById('loading');
             const resultContainer = document.getElementById('result-container');
             const resultDiv = document.getElementById('result');
+            
+            // Toggle between upload and Google Drive mode
+            document.getElementById('upload-mode').addEventListener('change', function() {
+                document.getElementById('upload-container').style.display = 'block';
+                document.getElementById('gdrive-container').style.display = 'none';
+            });
+            
+            document.getElementById('gdrive-mode').addEventListener('change', function() {
+                document.getElementById('upload-container').style.display = 'none';
+                document.getElementById('gdrive-container').style.display = 'block';
+            });
             
             // Check if API key exists in local storage
             const savedApiKey = localStorage.getItem('voxtoryApiKey');
@@ -225,15 +254,40 @@
                     return;
                 }
                 
-                const fileInput = document.getElementById('audio-file');
-                if (!fileInput.files[0]) {
-                    alert('Please select an audio file');
-                    return;
+                // Determine input mode (upload or Google Drive)
+                const isGdriveMode = document.getElementById('gdrive-mode').checked;
+                
+                // Handle each input mode
+                if (isGdriveMode) {
+                    // Google Drive Mode
+                    const gdriveId = document.getElementById('gdrive-id').value.trim();
+                    if (!gdriveId) {
+                        alert('Please enter a Google Drive file ID');
+                        return;
+                    }
+                    
+                    // Create form data with Drive ID
+                    const formData = new FormData();
+                    formData.append('file_id', gdriveId);
+                    
+                    processSubmission(formData, apiKey, true);
+                } else {
+                    // File Upload Mode
+                    const fileInput = document.getElementById('audio-file');
+                    if (!fileInput.files[0]) {
+                        alert('Please select an audio file');
+                        return;
+                    }
+                    
+                    const formData = new FormData();
+                    formData.append('audiofile', fileInput.files[0]);
+                    
+                    processSubmission(formData, apiKey, false);
                 }
-                
-                const formData = new FormData();
-                formData.append('audiofile', fileInput.files[0]);
-                
+            });
+            
+            // Process form submission based on mode
+            function processSubmission(formData, apiKey, isGdriveMode) {
                 // Show loading indicator
                 loadingDiv.style.display = 'block';
                 resultContainer.style.display = 'none';
@@ -243,21 +297,24 @@
                 const pollingStatus = document.getElementById('polling-status');
                 pollingStatus.style.display = 'none';
                 
-                // Get selected mode
+                // Get processing mode (sync/async)
                 const isAsync = document.getElementById('async-mode').checked;
                 
                 if (isAsync) {
                     // Use async API with polling
-                    submitAsyncRequest(formData, apiKey);
+                    submitAsyncRequest(formData, apiKey, isGdriveMode);
                 } else {
-                    // Use existing synchronous API
-                    submitSyncRequest(formData, apiKey);
+                    // Use synchronous API
+                    submitSyncRequest(formData, apiKey, isGdriveMode);
                 }
-            });
+            }
 
             // Submit synchronous request
-            function submitSyncRequest(formData, apiKey) {
-                fetch('/api/analyze', {
+            function submitSyncRequest(formData, apiKey, isGdriveMode) {
+                // Determine endpoint based on input mode
+                const endpoint = isGdriveMode ? '/api/analyze/gdrive' : '/api/analyze';
+                
+                fetch(endpoint, {
                     method: 'POST',
                     headers: {
                         'X-API-Key': apiKey
@@ -285,7 +342,7 @@
             }
 
             // Submit asynchronous request with polling
-            function submitAsyncRequest(formData, apiKey) {
+            function submitAsyncRequest(formData, apiKey, isGdriveMode) {
                 const pollingStatus = document.getElementById('polling-status');
                 const jobStatusElement = document.getElementById('job-status');
                 const jobIdElement = document.getElementById('job-id');
@@ -296,8 +353,11 @@
                 jobStatusElement.textContent = 'submitting...';
                 progressBar.style.width = '10%';
                 
+                // Determine endpoint based on input mode
+                const endpoint = isGdriveMode ? '/api/jobs/gdrive' : '/api/jobs';
+                
                 // Submit job
-                fetch('/api/jobs', {
+                fetch(endpoint, {
                     method: 'POST',
                     headers: {
                         'X-API-Key': apiKey

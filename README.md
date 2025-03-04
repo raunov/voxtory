@@ -5,11 +5,13 @@ A RESTful API that leverages Google Gemini's AI capabilities to analyze spoken c
 ## Features
 
 - **Audio Processing**: Upload audio files for transcription and analysis.
+- **Google Drive Integration**: Process audio files directly from Google Drive without downloading them first.
 - **Speaker Identification**: Distinguishes between different speakers (when possible).
 - **Content Analysis**: Extracts key topics, statements, and facts.
 - **Insight Generation**: Provides summaries and key takeaways.
 - **Token Authentication**: Secure API access with token-based authentication.
 - **Rate Limiting**: Protects against API abuse.
+- **JSON Handling**: Robust processing of analysis results in structured JSON format.
 
 ## API Overview
 
@@ -90,6 +92,49 @@ X-API-Key: your_api_token
   "status": "ok", 
   "message": "API is running and authentication is valid",
   "timestamp": "2025-03-02 23:35:00"
+}
+```
+
+#### POST /api/analyze/gdrive (Synchronous Google Drive)
+
+Analyze an audio file from Google Drive synchronously by providing a file ID.
+
+**Request:**
+```
+POST /api/analyze/gdrive
+X-API-Key: your_api_token
+Content-Type: application/x-www-form-urlencoded
+
+file_id=YOUR_GOOGLE_DRIVE_FILE_ID
+```
+
+**Response:**
+```json
+{
+  "result": "JSON analysis results as structured data"
+}
+```
+
+#### POST /api/jobs/gdrive (Asynchronous Google Drive)
+
+Start an asynchronous job to analyze an audio file from Google Drive.
+
+**Request:**
+```
+POST /api/jobs/gdrive
+X-API-Key: your_api_token
+Content-Type: application/x-www-form-urlencoded
+
+file_id=YOUR_GOOGLE_DRIVE_FILE_ID
+```
+
+**Response:**
+```json
+{
+  "job_id": "550e8400-e29b-41d4-a716-446655440000",
+  "status": "pending",
+  "message": "Job created successfully",
+  "check_url": "/api/jobs/550e8400-e29b-41d4-a716-446655440000"
 }
 ```
 
