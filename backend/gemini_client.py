@@ -1,6 +1,7 @@
 import base64
 import json
 import http.client
+import re
 from typing import Dict, Any, Optional
 
 from config import (
@@ -115,6 +116,89 @@ Output the result in the original language of the audio.
         
         return self._send_request(payload)
     
+    def _extract_and_parse_json(self, text: str) -> Dict[str, Any]:
+        """
+        Extract and parse JSON from text, handling various formatting cases.
+        
+        Args:
+            text: Text potentially containing JSON
+            
+        Returns:
+            Dict with parsed JSON result or original text
+        """
+        # Log original text length for debugging
+        logger.debug(f"Original text length: {len(text)}")
+        
+        # Strategy 1: Try to parse directly first
+        try:
+            json_obj = json.loads(text)
+            logger.info("Successfully parsed text as JSON directly")
+            return {"result": json_obj}
+        except json.JSONDecodeError:
+            logger.debug("Direct JSON parsing failed, trying alternative strategies")
+        
+        # Strategy 2: Try to extract JSON from markdown code blocks
+        # Look for JSON in triple backtick code blocks
+        json_pattern = r"```(?:json)?\s*([\s\S]*?)```"
+        matches = re.findall(json_pattern, text)
+        
+        if matches:
+            for json_str in matches:
+                try:
+                    # Try to parse each match
+                    json_obj = json.loads(json_str.strip())
+                    logger.info("Successfully extracted and parsed JSON from code block")
+                    return {"result": json_obj}
+                except json.JSONDecodeError:
+                    continue
+        
+        # Strategy 3: Try to find JSON object by looking for curly braces
+        try:
+            # Find the first { and the last } in the text
+            start_idx = text.find('{')
+            if start_idx != -1:
+                # Find the matching closing brace
+                brace_count = 0
+                json_text = ""
+                
+                for i in range(start_idx, len(text)):
+                    char = text[i]
+                    json_text += char
+                    
+                    if char == '{':
+                        brace_count += 1
+                    elif char == '}':
+                        brace_count -= 1
+                        
+                    if brace_count == 0 and len(json_text) > 2:  # At least "{}"
+                        try:
+                            json_obj = json.loads(json_text)
+                            logger.info("Successfully extracted and parsed JSON by brace matching")
+                            return {"result": json_obj}
+                        except json.JSONDecodeError:
+                            # Keep trying with more text
+                            pass
+        except Exception as e:
+            logger.warning(f"JSON extraction by brace matching failed: {str(e)}")
+        
+        # Strategy 4: Try to clean up the text and parse again
+        try:
+            # Remove any text before the first { and after the last }
+            first_brace = text.find('{')
+            last_brace = text.rfind('}')
+            
+            if first_brace != -1 and last_brace != -1 and first_brace < last_brace:
+                cleaned_text = text[first_brace:last_brace + 1]
+                json_obj = json.loads(cleaned_text)
+                logger.info("Successfully parsed JSON after cleaning text")
+                return {"result": json_obj}
+        except json.JSONDecodeError:
+            logger.debug("JSON parsing failed after cleaning text")
+        
+        # If all strategies fail, return the original text
+        logger.warning("All JSON parsing strategies failed, returning original text")
+        return {"result": text}
+    
     def _send_request(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         """
         Send a request to the Gemini API.
@@ -156,9 +240,10 @@ Output the result in the original language of the audio.
             response_json = json.loads(response_data)
             
             # Extract the text from the response
-            analysis_result = response_json.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "")
+            analysis_text = response_json.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "")
             
-            return {"result": analysis_result}
+            # Clean and parse the text to JSON
+            return self._extract_and_parse_json(analysis_text)
             
         except Exception as e:
             logger.error(f"Error communicating with Gemini API: {str(e)}")
