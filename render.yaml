@@ -4,7 +4,7 @@ services:
     env: docker
     region: frankfurt  # Frankfurt region for European deployments
     plan: free  # Free instance under the Hobby plan
-    branch: main  # Deploy from the main branch
+    branch: master  # Deploy from the main branch
     healthCheckPath: /api/health
     envVars:
       - key: ENVIRONMENT
