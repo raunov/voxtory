@@ -29,11 +29,48 @@ async def download_gdrive_file(file_id: str) -> Tuple[Optional[bytes], Optional[
             head_response = await client.head(url, follow_redirects=True)
             head_response.raise_for_status()
             
-            # Check if it's an audio file
+            # Check if it's a media file (audio/video) - Google Drive might return different content types
             content_type = head_response.headers.get('content-type', '')
-            if not content_type.startswith('audio/'):
-                logger.warning(f"File with ID {file_id} is not an audio file: {content_type}")
-                return None, None, f"File is not an audio file (content type: {content_type})"
+            
+            # List of acceptable media MIME types and extensions
+            media_mime_types = ['audio/', 'video/', 'application/octet-stream']
+            audio_extensions = ['.mp3', '.wav', '.ogg', '.m4a', '.aac', '.flac', '.wma', '.aiff']
+            video_extensions = ['.mp4', '.mov', '.avi', '.mkv', '.webm', '.m4v', '.mpg', '.mpeg']
+            media_extensions = audio_extensions + video_extensions
+            
+            # Check if content type directly indicates audio or video
+            is_media_file = any(content_type.startswith(mime) for mime in media_mime_types)
+            
+            # If not, try to infer from other indicators like file extension
+            if not is_media_file:
+                # For application/octet-stream or other generic types, check for known extensions
+                content_disposition = head_response.headers.get('content-disposition', '')
+                if content_disposition:
+                    # Extract filename from content-disposition header if available
+                    for ext in media_extensions:
+                        if ext in content_disposition.lower():
+                            is_media_file = True
+                            # Set a more specific content type based on type
+                            if ext in audio_extensions:
+                                content_type = f"audio/{ext[1:]}"  # Convert .m4a to audio/m4a
+                            elif ext in video_extensions:
+                                content_type = f"video/{ext[1:]}"  # Convert .mp4 to video/mp4
+                            break
+            
+            # Use a default content type for recognized extensions if content type is still generic
+            if content_type == 'application/octet-stream':
+                logger.info(f"Generic content type detected, assuming media for file ID: {file_id}")
+                content_type = "audio/mpeg"  # Default to audio/mpeg as a safe fallback
+                is_media_file = True
+            
+            # For MP4 files that might have been misidentified
+            if content_type == 'video/mp4':
+                logger.info(f"Video file detected, will extract audio: {file_id}")
+                is_media_file = True
+            
+            if not is_media_file:
+                logger.warning(f"File with ID {file_id} is not recognized as an audio/video file: {content_type}")
+                return None, None, f"File is not recognized as an audio or video file (content type: {content_type})"
             
             # Check file size if available
             content_length = head_response.headers.get('content-length')

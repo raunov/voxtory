@@ -126,13 +126,38 @@ async def analyze_audio(
     
     - **audiofile**: The audio file to analyze (required)
     """
-    # Validate content type
+    # Validate content type - allow audio and video formats
     content_type = audiofile.content_type or "audio/mpeg"
-    if not content_type.startswith("audio/"):
+    
+    # Check common media file extensions in the filename
+    audio_extensions = ['.mp3', '.wav', '.ogg', '.m4a', '.aac', '.flac', '.wma', '.aiff']
+    video_extensions = ['.mp4', '.mov', '.avi', '.mkv', '.webm', '.m4v', '.mpg', '.mpeg']
+    media_extensions = audio_extensions + video_extensions
+    is_media_file = False
+    
+    # Check content type for audio or video
+    if content_type.startswith("audio/") or content_type.startswith("video/"):
+        is_media_file = True
+    # Check by filename extension
+    elif audiofile.filename:
+        file_ext = os.path.splitext(audiofile.filename.lower())[1]
+        if file_ext in media_extensions:
+            is_media_file = True
+            # Update content type based on extension if generic
+            if content_type == "application/octet-stream":
+                if file_ext in audio_extensions:
+                    content_type = f"audio/{file_ext[1:]}"  # Convert .m4a to audio/m4a
+                else:
+                    content_type = f"video/{file_ext[1:]}"  # Convert .mp4 to video/mp4
+    
+    if not is_media_file:
         raise HTTPException(
             status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
-            detail="File must be an audio file"
+            detail=f"File must be an audio or video file. Current content type: {content_type}"
         )
+    
+    # Log the detected content type
+    logger.info(f"Processing media file with content type: {content_type}")
     
     # Read file content
     temp_file_path = None
@@ -227,13 +252,38 @@ async def create_analysis_job(
     
     - **audiofile**: The audio file to analyze (required)
     """
-    # Validate content type
+    # Validate content type - allow audio and video formats
     content_type = audiofile.content_type or "audio/mpeg"
-    if not content_type.startswith("audio/"):
+    
+    # Check common media file extensions in the filename
+    audio_extensions = ['.mp3', '.wav', '.ogg', '.m4a', '.aac', '.flac', '.wma', '.aiff']
+    video_extensions = ['.mp4', '.mov', '.avi', '.mkv', '.webm', '.m4v', '.mpg', '.mpeg']
+    media_extensions = audio_extensions + video_extensions
+    is_media_file = False
+    
+    # Check content type for audio or video
+    if content_type.startswith("audio/") or content_type.startswith("video/"):
+        is_media_file = True
+    # Check by filename extension
+    elif audiofile.filename:
+        file_ext = os.path.splitext(audiofile.filename.lower())[1]
+        if file_ext in media_extensions:
+            is_media_file = True
+            # Update content type based on extension if generic
+            if content_type == "application/octet-stream":
+                if file_ext in audio_extensions:
+                    content_type = f"audio/{file_ext[1:]}"  # Convert .m4a to audio/m4a
+                else:
+                    content_type = f"video/{file_ext[1:]}"  # Convert .mp4 to video/mp4
+    
+    if not is_media_file:
         raise HTTPException(
             status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
-            detail="File must be an audio file"
+            detail=f"File must be an audio or video file. Current content type: {content_type}"
         )
+    
+    # Log the detected content type
+    logger.info(f"Processing media file with content type: {content_type}")
     
     # Read file content
     temp_file_path = None
@@ -359,6 +409,10 @@ async def analyze_gdrive_audio(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=error
             )
+        
+        # Ensure content_type is valid for audio
+        if not content_type:
+            content_type = "audio/mpeg"  # Default if not provided
         
         # Process the audio with Gemini API
         filename = f"gdrive_{file_id}"
