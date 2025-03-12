@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: voxtory
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn api:start_api
+    healthCheckPath: /health
+    healthCheckTimeout: 5s
+    envVars:
+      - key: RENDER
+        value: true

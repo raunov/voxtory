@@ -2,6 +2,7 @@ import json
 import os
 import uuid
 import hashlib
+from datetime import datetime
 from flask import Flask, request, jsonify, send_from_directory
 from werkzeug.utils import secure_filename
 
@@ -128,6 +129,23 @@ def get_job(job_id):
         response['error'] = job['error']
         
     return jsonify(response)
+
+@app.route('/health', methods=['GET'])
+def health_check():
+    """Health check endpoint for monitoring"""
+    try:
+        # Quick DB check - just verify we can connect
+        db.get_db_connection().close()
+        db_status = "connected"
+    except Exception as e:
+        db_status = f"error: {str(e)}"
+    
+    return jsonify({
+        "status": "healthy",
+        "timestamp": datetime.now().isoformat(),
+        "database": db_status,
+        "version": "1.0.0"  # Version tracking
+    }), 200
 
 @app.route('/jobs', methods=['GET'])
 def list_jobs():
