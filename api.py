@@ -187,17 +187,13 @@ def internal_server_error(error):
 # Worker thread
 worker_thread = None
 
+# Start worker thread for processing jobs
+worker_thread = start_worker()
+
 def start_api():
-    """Start the Flask API server"""
-    global worker_thread
-    
-    # Start worker thread
-    worker_thread = start_worker()
-    
+    """Start the Flask API server (for local development)"""
     # Start Flask app
     app.run(host=API_HOST, port=API_PORT, debug=API_DEBUG)
-    
-    return app
 
 def stop_api():
     """Stop the Flask API server and worker thread"""
