@@ -3,6 +3,7 @@ import os
 import threading
 import time
 import uuid
+import asyncio
 import requests
 from datetime import datetime
 
@@ -76,8 +77,16 @@ def process_job(job):
             # Fall back to environment variable if no job-specific key
             api_key = os.environ.get("GEMINI_API_KEY")
             
-        # Call the generate function from poc.py with the API key
-        results = generate(file_path, api_key=api_key)
+        # Set up a new event loop for this thread
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        try:
+            # Call the generate function from poc.py with the API key
+            results = generate(file_path, api_key=api_key)
+        finally:
+            # Clean up the event loop
+            loop.close()
         
         # Update job status to completed with results
         updated_job = db.update_job_status(job_id, "completed", results=results)
