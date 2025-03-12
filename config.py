@@ -11,16 +11,8 @@ BASE_DIR = Path(os.path.dirname(os.path.abspath(__file__)))
 # Determine if we're running in production
 IS_PRODUCTION = os.environ.get('RENDER', False)
 
-# Database settings
-if IS_PRODUCTION:
-    # PostgreSQL connection string for Render
-    # Format: postgres://username:password@host:port/database_name
-    DATABASE_URL = os.environ.get('DATABASE_URL')
-    DB_TYPE = 'postgresql'
-else:
-    # SQLite for local development
-    DB_PATH = os.path.join(BASE_DIR, "jobs.db")
-    DB_TYPE = 'sqlite'
+# Database settings - always use SQLite
+DB_PATH = os.path.join(BASE_DIR, "jobs.db")
 
 # API settings
 API_HOST = os.environ.get('HOST', '0.0.0.0')

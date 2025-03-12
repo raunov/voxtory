@@ -1,6 +1,6 @@
-# Video/Audio Processing API Service
+# Voxtory
 
-A simple and robust API service that processes video and audio files using Google Gemini API for content analysis. The service is designed to handle long-running operations efficiently through an asynchronous job system with webhook notifications.
+A RESTful API that leverages Google Gemini's AI capabilities to analyze spoken content in audio recordings, providing context and insights for events and meetings. The service is designed to handle long-running operations efficiently through an asynchronous job system with webhook notifications.
 
 ## Architecture
 
@@ -8,7 +8,7 @@ This service implements a simple but effective asynchronous processing architect
 
 1. **API Server**: Accepts file uploads and creates jobs
 2. **Worker Thread**: Processes jobs in the background
-3. **Database**: Stores job status and results (SQLite in development, PostgreSQL in production)
+3. **Database**: Stores job status and results (SQLite for both development and production)
 4. **Webhook Notifications**: Alerts clients when jobs complete
 
 ## Authentication
@@ -23,12 +23,11 @@ This approach eliminates the need for a separate authentication system while ens
 
 ## Requirements
 
-- Python 3.7+
+- Python 3.9+
 - Flask
 - Requests
 - python-dotenv
 - google-genai
-- psycopg2-binary (for PostgreSQL support)
 - gunicorn (for production deployment)
 
 ## Local Development Setup
@@ -225,10 +224,13 @@ This service is ready to deploy on Render.com:
 
 ### Database Configuration
 
-For production deployment, the service automatically uses PostgreSQL when deployed to Render:
+For simplicity and reliability, this service uses SQLite for both development and production environments. SQLite provides several advantages:
 
-1. Create a PostgreSQL database in Render
-2. The service will automatically connect using the `DATABASE_URL` environment variable provided by Render
+1. **Zero Configuration**: No separate database service to set up
+2. **Automatic Reset**: On each deployment, the database starts fresh
+3. **Ideal for Stateless Apps**: Perfect for beta testing where persistence between deployments isn't critical
+
+The database file is stored in the application's filesystem, which is temporary but persistent during the lifetime of a deployment.
 
 ## Project Structure
 
@@ -236,7 +238,7 @@ For production deployment, the service automatically uses PostgreSQL when deploy
 n6unik_v2/
 ├── api.py              # Main Flask API server
 ├── worker.py           # Background worker process
-├── db.py               # Database operations (SQLite/PostgreSQL)
+├── db.py               # Database operations (SQLite)
 ├── config.py           # Configuration settings
 ├── poc.py              # Gemini API integration
 ├── .env                # Environment variables (local development)
@@ -244,7 +246,7 @@ n6unik_v2/
 ├── Procfile            # Render deployment configuration
 ├── requirements.txt    # Python dependencies
 ├── uploads/            # Directory for uploaded files
-└── jobs.db             # SQLite database file (dev only)
+└── jobs.db             # SQLite database file
 ```
 
 ## Notes
