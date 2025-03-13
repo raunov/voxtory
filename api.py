@@ -9,7 +9,7 @@ from werkzeug.utils import secure_filename
 import db
 from worker import start_worker, stop_worker
 from config import API_HOST, API_PORT, API_DEBUG, UPLOAD_FOLDER
-from url_downloader import download_from_url, is_youtube_url, is_valid_media_url
+from url_downloader import download_from_url
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -69,12 +69,6 @@ def create_job():
     # Process URL if provided
     if url:
         try:
-            # Validate URL format
-            if not (is_youtube_url(url) or is_valid_media_url(url)):
-                return jsonify({
-                    "error": "Invalid URL. Must be a YouTube URL or a direct link to a supported media file."
-                }), 400
-            
             # Download the file from URL
             try:
                 file_path = download_from_url(url, app.config['UPLOAD_FOLDER'])
