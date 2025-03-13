@@ -10,6 +10,44 @@ from google.genai import types
 # Load environment variables
 load_dotenv()
 
+def get_mime_type(file_path):
+    """
+    Determine MIME type based on file extension
+    
+    Args:
+        file_path: Path to the file
+        
+    Returns:
+        MIME type string or None if can't determine
+    """
+    ext = file_path.lower().split('.')[-1] if '.' in file_path else ''
+    
+    mime_types = {
+        # Audio formats
+        'mp3': 'audio/mpeg',
+        'm4a': 'audio/mp4',
+        'wav': 'audio/wav',
+        'aac': 'audio/aac',
+        'ogg': 'audio/ogg',
+        'flac': 'audio/flac',
+        
+        # Video formats
+        'mp4': 'video/mp4',
+        'mov': 'video/quicktime',
+        'avi': 'video/x-msvideo',
+        'mkv': 'video/x-matroska',
+        'webm': 'video/webm',
+        'flv': 'video/x-flv',
+        'wmv': 'video/x-ms-wmv',
+        
+        # Other common formats
+        'pdf': 'application/pdf',
+        'txt': 'text/plain',
+        'html': 'text/html'
+    }
+    
+    return mime_types.get(ext)
+
 def wait_for_file_active(client, file, max_wait=300, check_interval=5):
     """
     Wait for a file to become active, with timeout.
@@ -67,6 +105,11 @@ def generate(file_path, output_file=None, api_key=None):
     uploaded_file = client.files.upload(file=file_path)
     print(f"File uploaded with ID: {uploaded_file.name}")
     
+    # Determine MIME type based on file extension
+    mime_type = get_mime_type(file_path)
+    if not mime_type:
+        print(f"Warning: Could not determine MIME type for {file_path}. Gemini will attempt to detect it.")
+    
     # Wait for the file to become active
     active_file = wait_for_file_active(client, uploaded_file)
     
@@ -78,7 +121,7 @@ def generate(file_path, output_file=None, api_key=None):
             parts=[
                 types.Part.from_uri(
                     file_uri=files[0].uri,
-                    mime_type=files[0].mime_type,
+                    mime_type=mime_type or files[0].mime_type,
                 ),
                 types.Part.from_text(text="""You are tasked with analyzing a video recording and creating transcript, summary and dossiers for each speaker mentioned.
 
