@@ -65,8 +65,11 @@ POST /jobs
 - `X-Gemini-API-Key`: Your Gemini API key (required)
 
 **Parameters:**
-- `file`: The video or audio file to process (multipart/form-data)
+- `file`: The video or audio file to process (multipart/form-data) OR
+- `url`: A YouTube URL or direct link to a media file
 - `webhook_url` (optional): URL to receive a notification when the job completes
+
+**Note**: You must provide either a file upload OR a URL, not both.
 
 **Response:**
 ```json
@@ -164,11 +167,24 @@ The webhook payload will be identical to the response from the `GET /jobs/{job_i
 ### Using curl
 
 ```bash
-# Submit a new job with webhook
+# Submit a new job with file upload
 curl -X POST \
   -H "X-Gemini-API-Key: your_gemini_api_key_here" \
   -F "file=@video.mp4" \
   -F "webhook_url=https://webhook.site/your-unique-id" \
+  http://localhost:5000/jobs
+
+# Submit a new job with YouTube URL
+curl -X POST \
+  -H "X-Gemini-API-Key: your_gemini_api_key_here" \
+  -F "url=https://www.youtube.com/watch?v=dQw4w9WgXcQ" \
+  -F "webhook_url=https://webhook.site/your-unique-id" \
+  http://localhost:5000/jobs
+
+# Submit a new job with direct media URL
+curl -X POST \
+  -H "X-Gemini-API-Key: your_gemini_api_key_here" \
+  -F "url=https://example.com/sample-video.mp4" \
   http://localhost:5000/jobs
 
 # Check job status
@@ -189,7 +205,7 @@ import requests
 api_key = "your_gemini_api_key_here"
 headers = {"X-Gemini-API-Key": api_key}
 
-# Submit a new job
+# Submit a new job with file upload
 with open('video.mp4', 'rb') as f:
     files = {'file': f}
     data = {'webhook_url': 'https://webhook.site/your-unique-id'}
@@ -200,6 +216,18 @@ with open('video.mp4', 'rb') as f:
         data=data
     )
     job_id = response.json()['job_id']
+
+# OR submit a new job with URL
+data = {
+    'url': 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+    'webhook_url': 'https://webhook.site/your-unique-id'
+}
+response = requests.post(
+    'http://localhost:5000/jobs',
+    headers=headers,
+    data=data
+)
+job_id = response.json()['job_id']
 
 # Check job status
 response = requests.get(
@@ -236,17 +264,19 @@ The database file is stored in the application's filesystem, which is temporary 
 
 ```
 n6unik_v2/
-├── api.py              # Main Flask API server
-├── worker.py           # Background worker process
-├── db.py               # Database operations (SQLite)
-├── config.py           # Configuration settings
-├── poc.py              # Gemini API integration
-├── .env                # Environment variables (local development)
-├── .gitignore          # Git ignore file
-├── Procfile            # Render deployment configuration
-├── requirements.txt    # Python dependencies
-├── uploads/            # Directory for uploaded files
-└── jobs.db             # SQLite database file
+├── api.py                    # Main Flask API server
+├── worker.py                 # Background worker process
+├── db.py                     # Database operations (SQLite)
+├── config.py                 # Configuration settings
+├── poc.py                    # Gemini API integration
+├── url_downloader.py         # URL validation and downloading utilities
+├── test_url_functionality.py # Test script for URL functionality
+├── .env                      # Environment variables (local development)
+├── .gitignore                # Git ignore file
+├── Procfile                  # Render deployment configuration
+├── requirements.txt          # Python dependencies
+├── uploads/                  # Directory for uploaded files
+└── jobs.db                   # SQLite database file
 ```
 
 ## Notes
