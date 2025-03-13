@@ -9,6 +9,7 @@ from werkzeug.utils import secure_filename
 import db
 from worker import start_worker, stop_worker
 from config import API_HOST, API_PORT, API_DEBUG, UPLOAD_FOLDER
+from url_downloader import download_from_url, is_youtube_url, is_valid_media_url
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -43,7 +44,7 @@ def allowed_file(filename):
 
 @app.route('/jobs', methods=['POST'])
 def create_job():
-    """Create a new job by uploading a file"""
+    """Create a new job by uploading a file or providing a URL"""
     # Check for API key in header
     api_key = request.headers.get('X-Gemini-API-Key')
     if not api_key:
@@ -56,9 +57,49 @@ def create_job():
     # Get a hash of the API key for storage
     api_key_hash = hash_api_key(api_key)
     
-    # Check if file was included in request
+    # Get webhook URL if provided
+    webhook_url = request.form.get('webhook_url')
+    
+    # Generate unique job ID
+    job_id = str(uuid.uuid4())
+    
+    # Check if URL was provided in the request
+    url = request.form.get('url')
+    
+    # Process URL if provided
+    if url:
+        try:
+            # Validate URL format
+            if not (is_youtube_url(url) or is_valid_media_url(url)):
+                return jsonify({
+                    "error": "Invalid URL. Must be a YouTube URL or a direct link to a supported media file."
+                }), 400
+            
+            # Download the file from URL
+            try:
+                file_path = download_from_url(url, app.config['UPLOAD_FOLDER'])
+            except Exception as e:
+                return jsonify({"error": f"Failed to download file from URL: {str(e)}"}), 400
+            
+            # Store the API key for the worker to use
+            from worker import set_job_api_key
+            set_job_api_key(job_id, api_key)
+            
+            # Create job record in database with API key hash and source URL
+            job = db.create_job(job_id, file_path, webhook_url, api_key_hash, url)
+            
+            return jsonify({
+                "job_id": job_id,
+                "status": job['status'],
+                "message": "Job created successfully from URL"
+            }), 201
+            
+        except Exception as e:
+            return jsonify({"error": f"URL processing error: {str(e)}"}), 400
+    
+    # If no URL, check for file upload
     if 'file' not in request.files:
-        return jsonify({"error": "No file provided"}), 400
+        return jsonify({"error": "No file or URL provided. Please upload a file or provide a 'url' parameter."}), 400
         
     file = request.files['file']
     
@@ -70,11 +111,7 @@ def create_job():
     if not allowed_file(file.filename):
         return jsonify({"error": f"File type not allowed. Allowed types: {', '.join(ALLOWED_EXTENSIONS)}"}), 400
     
-    # Get webhook URL if provided
-    webhook_url = request.form.get('webhook_url')
-    
-    # Generate unique job ID and secure filename
-    job_id = str(uuid.uuid4())
+    # Process uploaded file
     filename = secure_filename(file.filename)
     file_extension = filename.rsplit('.', 1)[1].lower()
     storage_filename = f"{job_id}.{file_extension}"
@@ -119,6 +156,10 @@ def get_job(job_id):
         "created_at": job['created_at'],
         "updated_at": job['updated_at']
     }
+    
+    # Include source URL if available
+    if job.get('source_url'):
+        response['source_url'] = job['source_url']
     
     # Include results if job is completed
     if job['status'] == 'completed' and job.get('results'):
@@ -170,6 +211,10 @@ def list_jobs():
             "created_at": job['created_at'],
             "updated_at": job['updated_at']
         }
+        
+        # Include source URL if available
+        if job.get('source_url'):
+            job_data['source_url'] = job['source_url']
         job_list.append(job_data)
         
     return jsonify({"jobs": job_list})

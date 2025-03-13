@@ -31,6 +31,7 @@ def init_db():
         file_path TEXT NOT NULL,
         webhook_url TEXT,
         api_key_hash TEXT,
+        source_url TEXT,
         results TEXT,
         error TEXT,
         created_at TEXT NOT NULL,
@@ -41,7 +42,7 @@ def init_db():
     conn.commit()
     conn.close()
 
-def create_job(job_id, file_path, webhook_url=None, api_key_hash=None):
+def create_job(job_id, file_path, webhook_url=None, api_key_hash=None, source_url=None):
     """Create a new job in the database"""
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -49,9 +50,9 @@ def create_job(job_id, file_path, webhook_url=None, api_key_hash=None):
     now = datetime.now().isoformat()
     
     cursor.execute('''
-    INSERT INTO jobs (id, status, file_path, webhook_url, api_key_hash, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-    ''', (job_id, 'pending', file_path, webhook_url, api_key_hash, now, now))
+    INSERT INTO jobs (id, status, file_path, webhook_url, api_key_hash, source_url, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    ''', (job_id, 'pending', file_path, webhook_url, api_key_hash, source_url, now, now))
     
     conn.commit()
     conn.close()
