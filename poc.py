@@ -128,7 +128,10 @@ def generate(file_path, output_file=None, api_key=None):
     try:
         # Upload the file
         logger.info(f"Uploading file to Gemini API: {file_path}")
-        uploaded_file = client.files.upload(file=file_path)
+        uploaded_file = client.files.upload(
+            file=file_path,
+            config=types.UploadFileConfig(mime_type=mime_type)
+        )
         logger.info(f"File uploaded successfully with ID: {uploaded_file.name}")
         
         # Wait for the file to become active
