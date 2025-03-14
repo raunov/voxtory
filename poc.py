@@ -128,7 +128,7 @@ def generate(file_path, output_file=None, api_key=None):
     try:
         # Upload the file
         logger.info(f"Uploading file to Gemini API: {file_path}")
-        uploaded_file = client.files.upload(file=file_path, mime_type=mime_type)
+        uploaded_file = client.files.upload(file=file_path)
         logger.info(f"File uploaded successfully with ID: {uploaded_file.name}")
         
         # Wait for the file to become active
@@ -144,7 +144,7 @@ def generate(file_path, output_file=None, api_key=None):
                 parts=[
                     types.Part.from_uri(
                         file_uri=files[0].uri,
-                        mime_type=mime_type or files[0].mime_type,
+                        mime_type=mime_type,
                     ),
                     types.Part.from_text(text="""You are tasked with analyzing a video recording and creating transcript, summary and dossiers for each speaker mentioned.
 
