@@ -25,7 +25,7 @@ def get_mime_type(file_path):
     mime_types = {
         # Audio formats
         'mp3': 'audio/mpeg',
-        'm4a': 'audio/mp4',
+        'm4a': 'audio/x-m4a',
         'wav': 'audio/wav',
         'aac': 'audio/aac',
         'ogg': 'audio/ogg',
