@@ -69,11 +69,20 @@ def create_job():
     # Process URL if provided
     if url:
         try:
-            # Download the file from URL
+            # Extract mime_type from form data if provided
+            mime_type = request.form.get('mime_type')
+            
+            # Log the URL processing attempt
+            print(f"Processing URL job for {url} with mime_type: {mime_type or 'auto-detect'}")
+            
+            # Download the file from URL with improved error handling
             try:
-                file_path = download_from_url(url, app.config['UPLOAD_FOLDER'])
+                file_path = download_from_url(url, app.config['UPLOAD_FOLDER'], mime_type)
+                print(f"Downloaded file from URL to {file_path}")
             except Exception as e:
-                return jsonify({"error": f"Failed to download file from URL: {str(e)}"}), 400
+                error_msg = f"Failed to download file from URL: {str(e)}"
+                print(f"Download error: {error_msg}")
+                return jsonify({"error": error_msg}), 400
             
             # Store the API key for the worker to use
             from worker import set_job_api_key
@@ -89,7 +98,9 @@ def create_job():
             }), 201
             
         except Exception as e:
-            return jsonify({"error": f"URL processing error: {str(e)}"}), 400
+            error_msg = f"URL processing error: {str(e)}"
+            print(f"URL processing error: {error_msg}")
+            return jsonify({"error": error_msg}), 400
     
     # If no URL, check for file upload
     if 'file' not in request.files:

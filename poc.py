@@ -3,9 +3,18 @@ import base64
 import json
 import os
 import time
+import logging
+import traceback
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types
+
+# Set up logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger('poc')
 
 # Load environment variables
 load_dotenv()
@@ -96,34 +105,48 @@ def generate(file_path, output_file=None, api_key=None):
     gemini_key = api_key or os.environ.get("GEMINI_API_KEY")
     if not gemini_key:
         raise ValueError("No Gemini API key provided")
+    
+    # Check file existence and size
+    if not os.path.exists(file_path):
+        raise FileNotFoundError(f"File not found: {file_path}")
+    
+    file_size = os.path.getsize(file_path)
+    logger.info(f"Processing file: {file_path} (Size: {file_size} bytes)")
         
     client = genai.Client(
         api_key=gemini_key,
     )
 
-    # Upload the file
-    uploaded_file = client.files.upload(file=file_path)
-    print(f"File uploaded with ID: {uploaded_file.name}")
-    
     # Determine MIME type based on file extension
     mime_type = get_mime_type(file_path)
     if not mime_type:
-        print(f"Warning: Could not determine MIME type for {file_path}. Gemini will attempt to detect it.")
+        logger.warning(f"Could not determine MIME type for {file_path}. Will attempt to detect automatically.")
+        raise ValueError(f"Unknown mime type: Could not determine the mimetype for your file\n    please set the `mime_type` argument")
     
-    # Wait for the file to become active
-    active_file = wait_for_file_active(client, uploaded_file)
+    logger.info(f"Using MIME type: {mime_type} for file: {file_path}")
     
-    files = [active_file]
-    model = "gemini-2.0-flash-thinking-exp-01-21"
-    contents = [
-        types.Content(
-            role="user",
-            parts=[
-                types.Part.from_uri(
-                    file_uri=files[0].uri,
-                    mime_type=mime_type or files[0].mime_type,
-                ),
-                types.Part.from_text(text="""You are tasked with analyzing a video recording and creating transcript, summary and dossiers for each speaker mentioned.
+    try:
+        # Upload the file
+        logger.info(f"Uploading file to Gemini API: {file_path}")
+        uploaded_file = client.files.upload(file=file_path)
+        logger.info(f"File uploaded successfully with ID: {uploaded_file.name}")
+        
+        # Wait for the file to become active
+        logger.info(f"Waiting for file to be processed by Gemini API")
+        active_file = wait_for_file_active(client, uploaded_file)
+        logger.info(f"File is now active and ready for processing")
+        
+        files = [active_file]
+        model = "gemini-2.0-flash-thinking-exp-01-21"
+        contents = [
+            types.Content(
+                role="user",
+                parts=[
+                    types.Part.from_uri(
+                        file_uri=files[0].uri,
+                        mime_type=mime_type or files[0].mime_type,
+                    ),
+                    types.Part.from_text(text="""You are tasked with analyzing a video recording and creating transcript, summary and dossiers for each speaker mentioned.
 
 Additional instructions for video content:
 
@@ -171,11 +194,11 @@ Format your response as a JSON object with the following structure:
 \"views_beliefs\": [\"View/belief 1\", \"View/belief 2\"],
 \"visual_description\": \"Description of the speaker's appearance and actions\"
 }
-]
+],
 \"transcript\": [
 {\"speaker\": \"Speaker full name\", \"timestamp\": \"00:00:00\", \"text\": \"Speaker's spoken words\"},
 {\"speaker\": \"Speaker full name\", \"timestamp\": \"00:00:00\", \"text\": \"Speaker's spoken words\"}
-],
+]
 }
 
 Include only factual information in the \"facts\" array. Opinions or subjective statements should not be included here.
@@ -189,61 +212,97 @@ Ensure that your final output contains only the JSON object described above, wit
 Remember to focus on extracting and presenting factual information from the transcript. Do not include any speculative or inferred information.
 Your goal is to create an accurate and objective dossier for each speaker based solely on the information provided in the transcript.
 Output the result in the original language of the audio."""),
-            ],
-        ),
-    ]
-    generate_content_config = types.GenerateContentConfig(
-        temperature=0,
-        top_p=0.95,
-        top_k=64,
-        max_output_tokens=65536,
-        response_mime_type="text/plain",
-    )
+                ],
+            ),
+        ]
+        generate_content_config = types.GenerateContentConfig(
+            temperature=0,
+            top_p=0.95,
+            top_k=64,
+            max_output_tokens=65536,
+            response_mime_type="text/plain",
+        )
 
-    # Collect the complete response instead of streaming directly to output
-    print("Generating response...", end="")
-    full_response = ""
-    for chunk in client.models.generate_content_stream(
-        model=model,
-        contents=contents,
-        config=generate_content_config,
-    ):
-        # Handle None values in chunk.text
-        if chunk.text is not None:
-            full_response += chunk.text
-        print(".", end="", flush=True)
-    print("\nProcessing response...")
-    
-    # Ensure proper JSON formatting
-    # Strip any text before the first '{'
-    if '{' in full_response:
-        json_start = full_response.find('{')
-        full_response = full_response[json_start:]
-    
-    # Strip any text after the last '}'
-    if '}' in full_response:
-        json_end = full_response.rfind('}') + 1
-        full_response = full_response[:json_end]
-    
-    # Verify it's valid JSON
-    try:
-        json_data = json.loads(full_response)
-        print("Response is valid JSON.")
+        # Collect the complete response instead of streaming directly to output
+        logger.info("Generating response from Gemini API...")
+        full_response = ""
+        for chunk in client.models.generate_content_stream(
+            model=model,
+            contents=contents,
+            config=generate_content_config,
+        ):
+            # Handle None values in chunk.text
+            if chunk.text is not None:
+                full_response += chunk.text
+            print(".", end="", flush=True)
+        print("\n")
+        logger.info("Response generation completed, processing result...")
         
-        # Save to file if specified
-        if output_file:
-            with open(output_file, 'w', encoding='utf-8') as f:
-                json.dump(json_data, f, ensure_ascii=False, indent=2)
-                print(f"Output saved to {output_file}")
+        # Log response length for debugging
+        response_length = len(full_response)
+        logger.info(f"Response length: {response_length} characters")
         
-        # Print the formatted JSON
-        print(json.dumps(json_data, ensure_ascii=False, indent=2))
-        return json_data
-    except json.JSONDecodeError as e:
-        print(f"Warning: Response is not valid JSON. Error: {e}")
-        print("Outputting raw response:")
-        print(full_response)
-        return full_response
+        # Save raw response for debugging
+        raw_response_path = f"{os.path.splitext(file_path)[0]}_raw_response.txt"
+        with open(raw_response_path, 'w', encoding='utf-8') as f:
+            f.write(full_response)
+        logger.info(f"Raw response saved to {raw_response_path}")
+        
+        # Ensure proper JSON formatting
+        # Strip any text before the first '{'
+        if '{' in full_response:
+            json_start = full_response.find('{')
+            if json_start > 0:
+                logger.warning(f"Found {json_start} characters before JSON start, stripping them")
+                full_response = full_response[json_start:]
+        else:
+            logger.error("No JSON object found in response (no opening '{' character)")
+            raise ValueError("Response doesn't contain a JSON object")
+        
+        # Strip any text after the last '}'
+        if '}' in full_response:
+            json_end = full_response.rfind('}') + 1
+            if json_end < len(full_response):
+                logger.warning(f"Found {len(full_response) - json_end} characters after JSON end, stripping them")
+                full_response = full_response[:json_end]
+        else:
+            logger.error("No JSON object end found in response (no closing '}' character)")
+            raise ValueError("Response doesn't contain a complete JSON object")
+        
+        # Verify it's valid JSON
+        try:
+            json_data = json.loads(full_response)
+            logger.info("Successfully parsed response as valid JSON")
+            
+            # Save to file if specified
+            if output_file:
+                with open(output_file, 'w', encoding='utf-8') as f:
+                    json.dump(json_data, f, ensure_ascii=False, indent=2)
+                    logger.info(f"Output saved to {output_file}")
+            
+            # Print brief summary of the JSON data
+            num_speakers = len(json_data.get('speakers', []))
+            num_transcript_entries = len(json_data.get('transcript', []))
+            logger.info(f"Extracted data: {num_speakers} speakers, {num_transcript_entries} transcript entries")
+            
+            return json_data
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse response as JSON: {str(e)}")
+            
+            # Log more details about the parsing error
+            error_position = e.pos
+            context_start = max(0, error_position - 50)
+            context_end = min(len(full_response), error_position + 50)
+            error_context = full_response[context_start:context_end]
+            
+            logger.error(f"Error at position {error_position}: {error_context}")
+            logger.error(f"Error details: {e.msg}")
+            
+            # Return the raw response for further debugging
+            raise ValueError(f"Failed to convert server response to JSON: {str(e)}")
+    except Exception as e:
+        logger.error(f"Error processing file: {str(e)}", exc_info=True)
+        raise
 
 if __name__ == "__main__":
     # Parse command line arguments

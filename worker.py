@@ -4,12 +4,21 @@ import threading
 import time
 import uuid
 import asyncio
+import traceback
 import requests
+import logging
 from datetime import datetime
 
 from poc import generate
 import db
 from config import POLL_INTERVAL, MAX_RETRIES, RETRY_DELAY
+
+# Set up logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger('worker')
 
 # Global flag to control the worker thread
 running = True
@@ -65,7 +74,7 @@ def process_job(job):
     file_path = job['file_path']
     webhook_url = job['webhook_url']
     
-    print(f"Processing job {job_id} for file {file_path}")
+    logger.info(f"Processing job {job_id} for file {file_path}")
     
     # Update job status to processing
     db.update_job_status(job_id, "processing")
@@ -76,65 +85,98 @@ def process_job(job):
         if not api_key:
             # Fall back to environment variable if no job-specific key
             api_key = os.environ.get("GEMINI_API_KEY")
+            logger.info(f"Using environment API key for job {job_id}")
+        else:
+            logger.info(f"Using job-specific API key for job {job_id}")
             
+        # Check if file exists before processing
+        if not os.path.exists(file_path):
+            raise FileNotFoundError(f"Input file not found at {file_path}")
+            
+        # Log file information
+        file_size = os.path.getsize(file_path) if os.path.exists(file_path) else 0
+        logger.info(f"File size: {file_size} bytes, Path: {file_path}")
+        
         # Set up a new event loop for this thread
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         
         try:
             # Call the generate function from poc.py with the API key
+            logger.info(f"Starting Gemini API processing for job {job_id}")
             results = generate(file_path, api_key=api_key)
+            logger.info(f"Gemini API processing completed for job {job_id}")
+        except Exception as api_error:
+            # Get full traceback for API errors
+            error_traceback = traceback.format_exc()
+            logger.error(f"Gemini API error: {str(api_error)}\n{error_traceback}")
+            raise
         finally:
             # Clean up the event loop
             loop.close()
         
+        # Verify we got valid results
+        if isinstance(results, str):
+            logger.warning(f"Results not in JSON format: {results[:100]}...")
+        
         # Update job status to completed with results
         updated_job = db.update_job_status(job_id, "completed", results=results)
+        logger.info(f"Job {job_id} updated with completed status")
         
         # Send webhook if URL is provided
         if webhook_url:
             webhook_sent = send_webhook(webhook_url, updated_job)
             if not webhook_sent:
-                print(f"Warning: Webhook notification failed for job {job_id}")
+                logger.warning(f"Webhook notification failed for job {job_id}")
         
         # Clean up the uploaded file
         try:
             if os.path.exists(file_path):
                 os.remove(file_path)
-                print(f"File {file_path} removed after job completion")
+                logger.info(f"File {file_path} removed after job completion")
             else:
-                print(f"File {file_path} not found during cleanup")
+                logger.warning(f"File {file_path} not found during cleanup")
         except Exception as e:
-            print(f"Error removing file {file_path}: {str(e)}")
+            logger.error(f"Error removing file {file_path}: {str(e)}")
             
         # Always clear the API key when done
         clear_job_api_key(job_id)
         
-        print(f"Job {job_id} completed successfully")
+        logger.info(f"Job {job_id} completed successfully")
         return True
         
     except Exception as e:
-        error_message = str(e)
-        print(f"Error processing job {job_id}: {error_message}")
+        # Get full traceback
+        error_traceback = traceback.format_exc()
+        error_message = f"{str(e)}\n{error_traceback}"
+        logger.error(f"Error processing job {job_id}: {str(e)}\n{error_traceback}")
         
-        # Update job status to failed with error message
-        updated_job = db.update_job_status(job_id, "failed", error=error_message)
+        # Create a more detailed error message for the user
+        user_error_message = str(e)
+        if "Failed to convert server response to JSON" in user_error_message:
+            user_error_message = "Failed to process Gemini API response. This could be due to a temporary issue with the Gemini API or an invalid response format. Please try again or check your input file format."
+        elif "Could not determine the mimetype" in user_error_message:
+            user_error_message = f"{user_error_message}. Try adding the mime_type parameter (e.g., video/mp4, audio/mpeg) when submitting the job."
+        
+        # Update job status to failed with detailed error message
+        updated_job = db.update_job_status(job_id, "failed", error=user_error_message)
+        logger.info(f"Job {job_id} updated with failed status")
         
         # Send webhook with failure notification if URL is provided
         if webhook_url:
             webhook_sent = send_webhook(webhook_url, updated_job)
             if not webhook_sent:
-                print(f"Warning: Webhook notification failed for job {job_id}")
+                logger.warning(f"Webhook notification failed for job {job_id}")
         
         # Clean up the uploaded file on failure too
         try:
             if os.path.exists(file_path):
                 os.remove(file_path)
-                print(f"File {file_path} removed after job failure")
+                logger.info(f"File {file_path} removed after job failure")
             else:
-                print(f"File {file_path} not found during cleanup")
+                logger.warning(f"File {file_path} not found during cleanup")
         except Exception as cleanup_error:
-            print(f"Error removing file {file_path}: {str(cleanup_error)}")
+            logger.error(f"Error removing file {file_path}: {str(cleanup_error)}")
             
         # Always clear the API key when done
         clear_job_api_key(job_id)
