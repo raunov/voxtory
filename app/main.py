@@ -39,7 +39,7 @@ async def log_requests(request: Request, call_next):
     client_host = request.client.host if request.client else "unknown"
     
     # Log request
-    logger.info(f"Request started: {request.method} {request.url.path} from {client_host}")
+    # logger.info(f"Request started: {request.method} {request.url.path} from {client_host}")
     
     response = await call_next(request)
     
