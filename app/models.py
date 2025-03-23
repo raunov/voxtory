@@ -56,6 +56,7 @@ class ContentAnalysis(BaseModel):
 class VideoAnalysisRequest(BaseModel):
     youtube_url: str
     language: str = "en"
+    format: Optional[Literal["json", "markdown", "both"]] = "json"
 
 # API Response model
 class ApiResponse(BaseModel):

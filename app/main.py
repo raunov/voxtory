@@ -6,9 +6,11 @@ import time
 import json
 from typing import Optional
 
-from app.models import VideoAnalysisRequest, ApiResponse
+from app.models import VideoAnalysisRequest, ApiResponse, ContentAnalysis
 from app.auth import verify_api_key
 from app.video_service import process_video
+from app.utils.mermaid_generator import process_concept_map_to_mermaid_url
+from app.utils.markdown_generator import process_content_analysis_to_markdown
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -59,7 +61,8 @@ async def root():
         "version": "1.0.0",
         "description": "API for analyzing YouTube videos using Gemini AI",
         "endpoints": {
-            "/analyze": "POST - Analyze a YouTube video"
+            "/analyze": "POST - Analyze a YouTube video",
+            "/generate-mermaid": "POST - Generate a Mermaid mindmap from a concept map"
         },
         "authentication": "Bring your own Gemini API key in X-Gemini-API-Key header"
     }
@@ -99,8 +102,26 @@ async def analyze_video(
             additional_instructions=additional_instructions or ""
         )
         
+        # If the result contains a concept_map, add mermaid data
+        if result and "concept_map" in result:
+            mermaid_data = process_concept_map_to_mermaid_url(result["concept_map"])
+            result["mermaid"] = mermaid_data
+            
+        # Format the response according to the request
+        if request.format == "json" or request.format == "both":
+            # Keep the JSON result as is
+            response_data = result
+            
+            # Add markdown if requested
+            if request.format == "both":
+                response_data["markdown"] = process_content_analysis_to_markdown(result)
+        else:  # markdown only
+            # Create a response with just the markdown
+            markdown_content = process_content_analysis_to_markdown(result)
+            response_data = {"markdown": markdown_content}
+        
         # Return the result
-        return ApiResponse(status="success", data=result)
+        return ApiResponse(status="success", data=response_data)
         
     except ValueError as e:
         # Handle validation errors
@@ -115,4 +136,24 @@ async def analyze_video(
         return JSONResponse(
             status_code=500,
             content=ApiResponse(status="error", error=f"Error processing video: {str(e)}").model_dump()
+        )
+
+@app.post("/generate-mermaid", tags=["Utilities"])
+async def generate_mermaid(content_analysis: ContentAnalysis):
+    """
+    Generate a Mermaid mindmap from a concept map
+    
+    - **content_analysis**: The content analysis containing the concept map
+    
+    Returns:
+        A dictionary with the mermaid code and URL
+    """
+    try:
+        mermaid_data = process_concept_map_to_mermaid_url(content_analysis.concept_map)
+        return {"status": "success", "data": mermaid_data}
+    except Exception as e:
+        logger.error(f"Error generating mermaid: {str(e)}", exc_info=True)
+        return JSONResponse(
+            status_code=500,
+            content=ApiResponse(status="error", error=f"Error generating mermaid: {str(e)}").model_dump()
         )

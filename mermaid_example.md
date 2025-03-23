@@ -1,6 +1,3 @@
-create a 3 level mermaid mind map from data specified in SOURCE DATA.
-
-EXAMPLE RESULT:
 mindmap
     root(("**⚙️ Marmorimasin**<br>Video keskendub Wintergatani marmorimasina arengule ja tehnilistele üksikasjadele."))
         Marmorimasin X probleemid("**⚠️ Marmorimasina X probleemid** <br> Algse Marble Machine X-ga seotud probleemide tuvastamine.")
@@ -13,6 +10,3 @@ mindmap
         Ehitusprotsess ("**🛠️ Ehitusprotsess** <br> Ehitusprotsessi üksikasjad ja väljakutsed.")
             Piiratud tööriistad ("**🧰 Piiratud tööriistad** <br> Ehitusprotsessis kasutati piiratud tööriistu, sealhulgas nurklihvijat duširuumis.")
             Komponentide ehitamine ("**🧑‍🏭 Komponentide ehitamine** <br> Erinevate komponentide, nagu lineaarse liuguri ja klapi, ehitamine.")
-END EXAMPLE.
-
-SOURCE DATA:
