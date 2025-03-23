@@ -85,6 +85,10 @@ async def analyze_video(
     Requires Gemini API key in X-Gemini-API-Key header
     """
     try:
+        # Trim whitespace from YouTube URL
+        if request.youtube_url:
+            request.youtube_url = request.youtube_url.strip()
+            
         logger.info(f"Received request to analyze: {request.youtube_url}")
         
         # Process the video
