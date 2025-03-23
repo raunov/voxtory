@@ -1,10 +1,12 @@
 import json, re, os
+import zlib
+import base64
 from google import genai
 from google.genai import types
 import logging
 from app.prompts.base import get_language_prompt
 from app.models import ContentAnalysis
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -99,6 +101,21 @@ def process_video(youtube_url: str, language: str = 'en', api_key: str = None, a
             # Try to parse the JSON directly
             final_result = json.loads(response.text)
             logger.info("Structured JSON received.")
+            
+            # Generate mermaid chart from concept map if it exists
+            if 'concept_map' in final_result and final_result['concept_map']:
+                logger.info("Generating mermaid chart visualization...")
+                
+                # Generate mermaid code
+                mermaid_code = generate_mermaid_from_concept_map(client, final_result['concept_map'], language)
+                
+                # Encode mermaid code for URL
+                mermaid_url = encode_mermaid_for_url(mermaid_code)
+                
+                # Add mermaid URL to the result
+                final_result['mermaid_chart_url'] = mermaid_url
+                logger.info(f"Added mermaid chart URL: {mermaid_url}")
+            
             return final_result
         except json.JSONDecodeError as e:
             logger.warning(f"JSON parsing error: {str(e)}")
@@ -106,6 +123,21 @@ def process_video(youtube_url: str, language: str = 'en', api_key: str = None, a
             fixed_json = fix_json_with_gemini(client, response.text)
             if fixed_json:
                 logger.info("JSON successfully fixed!")
+                
+                # Generate mermaid chart from fixed JSON concept map if it exists
+                if 'concept_map' in fixed_json and fixed_json['concept_map']:
+                    logger.info("Generating mermaid chart visualization from fixed JSON...")
+                    
+                    # Generate mermaid code
+                    mermaid_code = generate_mermaid_from_concept_map(client, fixed_json['concept_map'], language)
+                    
+                    # Encode mermaid code for URL
+                    mermaid_url = encode_mermaid_for_url(mermaid_code)
+                    
+                    # Add mermaid URL to the result
+                    fixed_json['mermaid_chart_url'] = mermaid_url
+                    logger.info(f"Added mermaid chart URL: {mermaid_url}")
+                
                 return fixed_json
             else:
                 logger.warning("Failed to fix JSON. Returning raw response.")
@@ -167,3 +199,88 @@ def fix_json_with_gemini(client, response_text: str, max_attempts: int = 3) -> O
     # If we reach here, all attempts failed
     logger.warning("All fix attempts failed")
     return None
+
+def generate_mermaid_from_concept_map(client, concept_map: List[Dict[str, Any]], language: str = 'en') -> str:
+    """
+    Generate mermaid mindmap code from concept map JSON using Gemini.
+    
+    Args:
+        client: Gemini API client
+        concept_map: List of concept map entries
+        language: Language code for output
+        
+    Returns:
+        str: Generated mermaid code
+    """
+    # Use the flash-lite model for mermaid generation
+    mermaid_model = "gemini-2.0-flash-lite"
+    
+    logger.info("Generating mermaid chart from concept map...")
+    
+    # Create a prompt with example mermaid format
+    prompt = f"""
+    Create a 3 level mermaid mind map from the following concept map data:
+    
+    {json.dumps(concept_map, indent=2)}
+    
+    Follow this exact format for the mindmap:
+    mindmap
+        root(("**⚙️ Root concept**<br>Description"))
+            main_concept1("**💡 Main concept**<br>Description")
+                sub_concept1("**🔍 Sub concept**<br>Description")
+            main_concept2(...)
+    
+    Use the emoji from each concept in the diagram. Format each node with bold title and description on new line with <br> tag.
+    The root node should use double parentheses (( )), and all other nodes should use regular parentheses ( ).
+    Return ONLY the mermaid code with no additional text or explanations.
+    """
+    
+    try:
+        # Generate mermaid code with Gemini
+        response = client.models.generate_content(
+            model=mermaid_model,
+            contents=[{"role": "user", "parts": [{"text": prompt}]}]
+        )
+        
+        # Extract generated mermaid code
+        mermaid_code = response.text.strip()
+        
+        # Make sure it starts with 'mindmap'
+        if not mermaid_code.startswith("mindmap"):
+            mermaid_code = "mindmap\n" + mermaid_code
+            
+        logger.info("Successfully generated mermaid chart")
+        return mermaid_code
+        
+    except Exception as e:
+        logger.error(f"Error generating mermaid chart: {str(e)}")
+        # Return a simple fallback mermaid chart on error
+        return "mindmap\n    root((\"Unable to generate chart\"))"
+
+def encode_mermaid_for_url(mermaid_code: str) -> str:
+    """
+    Encode mermaid code to be used in a mermaid.ink URL
+    
+    Args:
+        mermaid_code: Mermaid chart code
+        
+    Returns:
+        str: URL to the mermaid chart visualization
+    """
+    logger.info("Encoding mermaid chart for URL...")
+    try:
+        # Compress with zlib (pako compatible)
+        compressed = zlib.compress(mermaid_code.encode('utf-8'))
+        
+        # Convert to base64 and make URL-safe
+        encoded = base64.urlsafe_b64encode(compressed).decode('ascii')
+        
+        # Create the mermaid.ink URL
+        mermaid_url = f"https://mermaid.ink/img/pako:{encoded}"
+        
+        logger.info("Successfully encoded mermaid chart URL")
+        return mermaid_url
+        
+    except Exception as e:
+        logger.error(f"Error encoding mermaid chart: {str(e)}")
+        return "https://mermaid.ink/img/error"

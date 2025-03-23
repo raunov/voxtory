@@ -51,6 +51,7 @@ class Speaker(BaseModel):
 class ContentAnalysis(BaseModel):
     concept_map: List[MainConcept]  # Concept map of the video content
     speakers: List[Speaker]  # Detailed information about each speaker
+    mermaid_chart_url: Optional[str] = None  # URL to the mermaid chart visualization
 
 # API Request models
 class VideoAnalysisRequest(BaseModel):
