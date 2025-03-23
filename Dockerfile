@@ -27,4 +27,4 @@ COPY . .
 EXPOSE $PORT
 
 # Command to run the application
-CMD gunicorn app.main:app --workers 2 --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:$PORT
+CMD gunicorn app.main:app --workers 1 --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:$PORT --timeout 180 --graceful-timeout 180 --keep-alive 5
