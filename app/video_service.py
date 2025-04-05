@@ -1,4 +1,4 @@
-import json, re, os, requests, tempfile, shutil
+import json, re, os, requests, tempfile, shutil, mimetypes, time
 from google import genai
 from google.genai import types
 from google.api_core import exceptions as google_exceptions
@@ -77,20 +77,23 @@ def _download_google_drive_file(file_id: str) -> str:
             logger.info(f"Successfully downloaded Google Drive file to {temp_file_path}")
             return temp_file_path
             
+    except requests.exceptions.HTTPError as e:
+        # Re-raise HTTPError to be caught specifically by the caller
+        shutil.rmtree(temp_dir) # Clean up temp dir
+        logger.error(f"HTTP error downloading Google Drive file {file_id}: {e}")
+        raise e 
     except requests.exceptions.RequestException as e:
-        shutil.rmtree(temp_dir) # Clean up temp dir on error
+        # Handle other network errors (Connection, Timeout, etc.)
+        shutil.rmtree(temp_dir) # Clean up temp dir
         logger.error(f"Network error downloading Google Drive file {file_id}: {e}")
-        raise ValueError(f"Failed to download Google Drive file {file_id}. Network error: {e}")
+        # Raise the original exception for the caller to handle network issues
+        raise e
     except Exception as e:
-        shutil.rmtree(temp_dir) # Clean up temp dir on error
-        logger.error(f"Error downloading Google Drive file {file_id}: {e}")
-        # Check for common HTTP errors explicitly
-        if isinstance(e, requests.exceptions.HTTPError):
-             if e.response.status_code == 404:
-                 raise ValueError(f"Google Drive file {file_id} not found or not publicly accessible.")
-             else:
-                 raise ValueError(f"Failed to download Google Drive file {file_id}. HTTP Status: {e.response.status_code}")
-        raise ValueError(f"An unexpected error occurred while downloading Google Drive file {file_id}: {e}")
+        # Catch any other unexpected errors during download/saving
+        shutil.rmtree(temp_dir) # Clean up temp dir
+        logger.error(f"Unexpected error during Google Drive file download {file_id}: {e}", exc_info=True)
+        # Raise a generic ValueError for unexpected issues
+        raise ValueError(f"An unexpected error occurred while downloading Google Drive file {file_id}.")
 
 # --- Main Processing Function ---
 
@@ -146,12 +149,25 @@ def process_video(source_value: str, source_type: str, language: str = 'en', api
             # Download the file first
             temp_file_path = _download_google_drive_file(source_value)
             temp_file_to_delete = temp_file_path # Mark for deletion
-            
+
+            # Guess MIME type from the downloaded file's path/extension
+            mime_type, _ = mimetypes.guess_type(temp_file_path)
+            if not mime_type:
+                # Clean up before raising error
+                if temp_file_to_delete and os.path.exists(temp_file_to_delete):
+                     try:
+                         temp_dir = os.path.dirname(temp_file_to_delete)
+                         shutil.rmtree(temp_dir)
+                     except Exception as e_clean:
+                         logger.error(f"Error during cleanup after MIME type failure: {e_clean}")
+                raise ValueError(f"Could not determine MIME type for file: {os.path.basename(temp_file_path)}")
+            logger.info(f"Guessed MIME type: {mime_type} for file {temp_file_path}")
+
             # Upload the downloaded file to Gemini Files API
             logger.info(f"Uploading temporary file {temp_file_path} to Gemini...")
             try:
-                # Let Gemini infer mime type during upload if possible
-                gemini_file = client.files.upload(file=temp_file_path) 
+                # Use the guessed mime_type
+                gemini_file = client.files.upload(file=temp_file_path, mime_type=mime_type)
                 logger.info(f"File uploaded successfully to Gemini: {gemini_file.name} ({gemini_file.mime_type})")
             except google_exceptions.GoogleAPIError as e:
                  logger.error(f"Gemini file upload failed: {e}")

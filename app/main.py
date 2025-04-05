@@ -4,6 +4,7 @@ from fastapi.responses import JSONResponse
 import logging
 import time
 import json
+import requests # Import requests for exception handling
 from typing import Optional
 
 from app.models import VideoAnalysisRequest, ApiResponse, ContentAnalysis
@@ -135,17 +136,46 @@ async def analyze_video(
         
         # Return the result
         return ApiResponse(status="success", data=response_data)
-        
-    except ValueError as e:
-        # Handle validation errors
-        logger.warning(f"Validation error: {str(e)}")
+
+    except requests.exceptions.HTTPError as e:
+        # Handle specific HTTP errors from Google Drive download
+        status_code = e.response.status_code
+        error_message = f"Error downloading from Google Drive: {e}"
+        response_status_code = 502 # Default to Bad Gateway for upstream errors
+
+        if status_code == 404:
+            error_message = "Google Drive file not found. Please check the file ID and ensure the file is publicly accessible ('Anyone with the link can view')."
+            response_status_code = 404
+        elif status_code == 403:
+             error_message = "Access denied to Google Drive file. Please ensure the file sharing setting is 'Anyone with the link can view'."
+             response_status_code = 403
+        elif status_code >= 500:
+             error_message = f"Google Drive server error (Status: {status_code}). Please try again later."
+             # Keep response_status_code as 502
+
+        logger.error(f"HTTP error during Google Drive download: {e}")
         return JSONResponse(
-            status_code=400,
+            status_code=response_status_code,
+            content=ApiResponse(status="error", error=error_message).model_dump()
+        )
+    except requests.exceptions.RequestException as e:
+        # Handle other network errors (connection, timeout) during GDrive download
+        logger.error(f"Network error during Google Drive download: {e}")
+        return JSONResponse(
+            status_code=504, # Gateway Timeout
+            content=ApiResponse(status="error", error=f"Network error communicating with Google Drive: {e}").model_dump()
+        )
+    except ValueError as e:
+        # Handle validation errors (invalid URL/ID, Gemini API key issues, etc.)
+        logger.warning(f"Validation or processing error: {str(e)}")
+        # Use 400 for most validation errors, but could refine if needed (e.g., 401 for bad API key)
+        return JSONResponse(
+            status_code=400, 
             content=ApiResponse(status="error", error=str(e)).model_dump()
         )
     except Exception as e:
-        # Handle unexpected errors
-        logger.error(f"Error processing video: {str(e)}", exc_info=True)
+        # Handle other unexpected errors during processing
+        logger.error(f"Unexpected error processing request: {str(e)}", exc_info=True)
         return JSONResponse(
             status_code=500,
             content=ApiResponse(status="error", error=f"Error processing video: {str(e)}").model_dump()
