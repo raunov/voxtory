@@ -152,6 +152,14 @@ def process_video(source_value: str, source_type: str, language: str = 'en', api
 
             # Guess MIME type from the downloaded file's path/extension
             mime_type, _ = mimetypes.guess_type(temp_file_path)
+            logger.info(f"Initial guessed MIME type: {mime_type} for file {temp_file_path}") # Log initial guess
+
+            # Fallback specifically for .m4a if guessing failed
+            if not mime_type and temp_file_path.lower().endswith('.m4a'):
+                mime_type = 'audio/mp4' # Assign fallback MIME type for .m4a
+                logger.info(f"MIME type not guessed, using fallback '{mime_type}' for .m4a file.")
+
+            # Now, check if we have a mime_type before proceeding
             if not mime_type:
                 # Clean up before raising error
                 if temp_file_to_delete and os.path.exists(temp_file_to_delete):
@@ -160,13 +168,13 @@ def process_video(source_value: str, source_type: str, language: str = 'en', api
                          shutil.rmtree(temp_dir)
                      except Exception as e_clean:
                          logger.error(f"Error during cleanup after MIME type failure: {e_clean}")
+                # Raise error only if it's not .m4a and couldn't be guessed
                 raise ValueError(f"Could not determine MIME type for file: {os.path.basename(temp_file_path)}")
-            logger.info(f"Guessed MIME type: {mime_type} for file {temp_file_path}")
 
             # Upload the downloaded file to Gemini Files API
-            logger.info(f"Uploading temporary file {temp_file_path} to Gemini...")
+            logger.info(f"Uploading temporary file {temp_file_path} to Gemini with MIME type {mime_type}...")
             try:
-                # Use the guessed mime_type
+                # Use the determined mime_type (either guessed or fallback)
                 gemini_file = client.files.upload(file=temp_file_path, mime_type=mime_type)
                 logger.info(f"File uploaded successfully to Gemini: {gemini_file.name} ({gemini_file.mime_type})")
             except google_exceptions.GoogleAPIError as e:
