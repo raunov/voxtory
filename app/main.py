@@ -88,15 +88,28 @@ async def analyze_video(
     Requires Gemini API key in X-Gemini-API-Key header
     """
     try:
-        # Trim whitespace from YouTube URL
+        # Input validation
+        if not request.youtube_url and not request.google_drive_id:
+            raise ValueError("Either 'youtube_url' or 'google_drive_id' must be provided.")
+        if request.youtube_url and request.google_drive_id:
+            raise ValueError("Provide either 'youtube_url' or 'google_drive_id', not both.")
+
+        # Trim whitespace from inputs
         if request.youtube_url:
             request.youtube_url = request.youtube_url.strip()
+            logger.info(f"Received request to analyze YouTube URL: {request.youtube_url}")
+            source_type = "youtube"
+            source_value = request.youtube_url
+        else: # google_drive_id must be present due to validation above
+            request.google_drive_id = request.google_drive_id.strip()
+            logger.info(f"Received request to analyze Google Drive ID: {request.google_drive_id}")
+            source_type = "google_drive"
+            source_value = request.google_drive_id
             
-        logger.info(f"Received request to analyze: {request.youtube_url}")
-        
-        # Process the video
+        # Process the video/file
         result = process_video(
-            youtube_url=request.youtube_url,
+            source_value=source_value,
+            source_type=source_type,
             language=request.language,
             api_key=api_key,
             additional_instructions=additional_instructions or ""

@@ -54,7 +54,8 @@ class ContentAnalysis(BaseModel):
 
 # API Request models
 class VideoAnalysisRequest(BaseModel):
-    youtube_url: str
+    youtube_url: Optional[str] = None
+    google_drive_id: Optional[str] = None
     language: str = "en"
     format: Optional[Literal["json", "markdown", "both"]] = "json"
 

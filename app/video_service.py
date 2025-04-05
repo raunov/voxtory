@@ -1,6 +1,7 @@
-import json, re, os
+import json, re, os, requests, tempfile, shutil
 from google import genai
 from google.genai import types
+from google.api_core import exceptions as google_exceptions
 import logging
 from app.prompts.base import get_language_prompt
 from app.models import ContentAnalysis
@@ -10,11 +11,14 @@ from typing import Optional, Dict, Any
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# Gemini model to use
-base_model = "gemini-2.0-pro-exp-02-05"  # Supports structured output
+# Gemini models
+base_model = "gemini-2.5-pro-preview-03-25" 
+fix_model = "gemini-2.0-flash" # Use Flash for fixing JSON
 
-def is_youtube_url(url: str) -> bool:
-    """Check if the given string is a YouTube URL."""
+# --- Helper Functions ---
+
+def _is_youtube_url(url: str) -> bool:
+    """Check if the given string is a valid YouTube URL."""
     if not url:
         return False
     
@@ -28,26 +32,86 @@ def setup_gemini_client(api_key: str):
     
     return genai.Client(api_key=api_key)
 
-def process_video(youtube_url: str, language: str = 'en', api_key: str = None, additional_instructions: str = ''):
+def _download_google_drive_file(file_id: str) -> str:
     """
-    Process video from a YouTube URL
+    Downloads a publicly accessible Google Drive file to a temporary location.
     
     Args:
-        youtube_url (str): YouTube URL to analyze
-        language (str): Language code for the output (default: 'en' for English)
-        api_key (str): Gemini API key
-        additional_instructions (str): Any additional instructions to append to the prompt
+        file_id (str): The Google Drive file ID.
+        
+    Returns:
+        str: The path to the temporary downloaded file.
+        
+    Raises:
+        ValueError: If the download fails (e.g., invalid ID, not public, network error).
+    """
+    logger.info(f"Attempting to download Google Drive file ID: {file_id}")
+    download_url = f"https://drive.google.com/uc?export=download&id={file_id}"
+    temp_dir = tempfile.mkdtemp()
+    # Use a generic name first, try to get real name later if possible
+    temp_file_path = os.path.join(temp_dir, f"gdrive_{file_id}") 
+
+    try:
+        with requests.get(download_url, stream=True, timeout=60) as r:
+            r.raise_for_status() # Raises HTTPError for bad responses (4xx or 5xx)
+            
+            # Try to get filename from headers if available
+            content_disposition = r.headers.get('content-disposition')
+            filename = None
+            if content_disposition:
+                filenames = re.findall('filename="(.+)"', content_disposition)
+                if filenames:
+                    filename = filenames[0]
+                    # Update temp_file_path with actual filename if found
+                    new_temp_file_path = os.path.join(temp_dir, filename)
+                    if os.path.exists(temp_file_path): # Should not exist yet, but check
+                         os.remove(temp_file_path)
+                    temp_file_path = new_temp_file_path
+
+            logger.info(f"Downloading to temporary file: {temp_file_path}")
+            with open(temp_file_path, 'wb') as f:
+                # Download in chunks for potentially large files
+                for chunk in r.iter_content(chunk_size=8192): 
+                    f.write(chunk)
+            
+            logger.info(f"Successfully downloaded Google Drive file to {temp_file_path}")
+            return temp_file_path
+            
+    except requests.exceptions.RequestException as e:
+        shutil.rmtree(temp_dir) # Clean up temp dir on error
+        logger.error(f"Network error downloading Google Drive file {file_id}: {e}")
+        raise ValueError(f"Failed to download Google Drive file {file_id}. Network error: {e}")
+    except Exception as e:
+        shutil.rmtree(temp_dir) # Clean up temp dir on error
+        logger.error(f"Error downloading Google Drive file {file_id}: {e}")
+        # Check for common HTTP errors explicitly
+        if isinstance(e, requests.exceptions.HTTPError):
+             if e.response.status_code == 404:
+                 raise ValueError(f"Google Drive file {file_id} not found or not publicly accessible.")
+             else:
+                 raise ValueError(f"Failed to download Google Drive file {file_id}. HTTP Status: {e.response.status_code}")
+        raise ValueError(f"An unexpected error occurred while downloading Google Drive file {file_id}: {e}")
+
+# --- Main Processing Function ---
+
+def process_video(source_value: str, source_type: str, language: str = 'en', api_key: str = None, additional_instructions: str = ''):
+    """
+    Process video/file from a YouTube URL or Google Drive ID.
+    
+    Args:
+        source_value (str): YouTube URL or Google Drive File ID.
+        source_type (str): Either 'youtube' or 'google_drive'.
+        language (str): Language code for the output (default: 'en' for English).
+        api_key (str): Gemini API key.
+        additional_instructions (str): Any additional instructions to append to the prompt.
     
     Returns:
-        The structured content analysis result
+        The structured content analysis result.
     """
-    if not youtube_url:
-        raise ValueError("YouTube URL is required")
-    
-    if not is_youtube_url(youtube_url):
-        raise ValueError(f"Invalid YouTube URL: {youtube_url}")
-    
-    logger.info(f"Processing YouTube URL: {youtube_url}")
+    if not source_value:
+        raise ValueError("Source value (URL or ID) is required")
+        
+    logger.info(f"Processing {source_type}: {source_value}")
     
     # Set up Gemini client
     client = setup_gemini_client(api_key)
@@ -55,37 +119,94 @@ def process_video(youtube_url: str, language: str = 'en', api_key: str = None, a
     # Get the prompt with language instructions
     prompt = get_language_prompt(language, additional_instructions)
     
-    # For YouTube URL, create content using from_uri
-    contents = [
-        types.Content(
-            role="user",
-            parts=[
-                types.Part.from_uri(
-                    file_uri=youtube_url,
-                    mime_type="video/*",
-                ),
-                types.Part.from_text(text=prompt),
-            ],
-        ),
-    ]
+    gemini_file = None
+    temp_file_to_delete = None
     
-    # Count tokens for YouTube URL
-    logger.info("Counting tokens for YouTube video...")
     try:
-        token_count = client.models.count_tokens(
-            model=base_model, 
-            contents=[
-                {"role": "user", "parts": [{"text": youtube_url}, {"text": prompt}]}
+        if source_type == "youtube":
+            if not _is_youtube_url(source_value):
+                raise ValueError(f"Invalid YouTube URL: {source_value}")
+            
+            # For YouTube URL, create content using from_uri
+            contents = [
+                types.Content(
+                    role="user",
+                    parts=[
+                        types.Part.from_uri(
+                            file_uri=source_value,
+                            mime_type="video/*", # Let Gemini infer video type
+                        ),
+                        types.Part.from_text(text=prompt),
+                    ],
+                ),
             ]
-        )
-        logger.info(f"Token count: {token_count}")
-    except Exception as e:
-        logger.warning(f"Token counting for YouTube video failed: {str(e)}")
-        logger.info("Continuing with analysis...")
-        
-    # Get structured content analysis directly with base model
-    logger.info("Getting structured analysis with base model for YouTube video...")
-    try:
+            logger.info("Prepared content using YouTube URI.")
+
+        elif source_type == "google_drive":
+            # Download the file first
+            temp_file_path = _download_google_drive_file(source_value)
+            temp_file_to_delete = temp_file_path # Mark for deletion
+            
+            # Upload the downloaded file to Gemini Files API
+            logger.info(f"Uploading temporary file {temp_file_path} to Gemini...")
+            try:
+                # Let Gemini infer mime type during upload if possible
+                gemini_file = client.files.upload(file=temp_file_path) 
+                logger.info(f"File uploaded successfully to Gemini: {gemini_file.name} ({gemini_file.mime_type})")
+            except google_exceptions.GoogleAPIError as e:
+                 logger.error(f"Gemini file upload failed: {e}")
+                 raise ValueError(f"Failed to upload file to Gemini: {e}")
+            except Exception as e:
+                 logger.error(f"Unexpected error during Gemini file upload: {e}")
+                 raise ValueError(f"Unexpected error uploading file to Gemini: {e}")
+
+            # Wait for the file to be processed by Gemini
+            while gemini_file.state == types.FileState.PROCESSING:
+                logger.info("Waiting for Gemini file processing...")
+                time.sleep(10) # Wait 10 seconds before checking again
+                gemini_file = client.files.get(name=gemini_file.name)
+            
+            if gemini_file.state == types.FileState.FAILED:
+                logger.error(f"Gemini file processing failed: {gemini_file.error}")
+                raise ValueError(f"Gemini failed to process the uploaded file: {gemini_file.error}")
+            elif gemini_file.state != types.FileState.ACTIVE:
+                 logger.warning(f"Gemini file state is unexpected: {gemini_file.state}")
+                 # Proceed anyway, maybe it works
+
+            logger.info("Gemini file processing complete.")
+
+            # Create content using the uploaded file reference
+            contents = [
+                types.Content(
+                    role="user",
+                    parts=[
+                        types.Part.from_file_data(
+                            file_data=types.FileData(
+                                file_uri=gemini_file.uri,
+                                mime_type=gemini_file.mime_type
+                            )
+                        ),
+                        types.Part.from_text(text=prompt),
+                    ],
+                ),
+            ]
+            logger.info("Prepared content using uploaded Gemini file URI.")
+            
+        else:
+            raise ValueError(f"Invalid source_type: {source_type}")
+
+        # --- Token Counting (Optional - can be refined later) ---
+        # logger.info("Counting tokens...") 
+        # try:
+        #     # Adapt token counting based on source type if needed
+        #     token_count = client.models.count_tokens(model=base_model, contents=contents) 
+        #     logger.info(f"Token count: {token_count}")
+        # except Exception as e:
+        #     logger.warning(f"Token counting failed: {str(e)}")
+        #     logger.info("Continuing with analysis...")
+            
+        # --- Generate Content ---
+        logger.info(f"Getting structured analysis with model {base_model}...")
         response = client.models.generate_content(
             model=base_model,
             contents=contents,
@@ -95,28 +216,64 @@ def process_video(youtube_url: str, language: str = 'en', api_key: str = None, a
             )
         )
         
+        # --- Process Response ---
         try:
             # Try to parse the JSON directly
             final_result = json.loads(response.text)
             logger.info("Structured JSON received.")
             return final_result
         except json.JSONDecodeError as e:
-            logger.warning(f"JSON parsing error: {str(e)}")
+            logger.warning(f"JSON parsing error: {str(e)}. Raw response: {response.text[:500]}...") # Log beginning of raw response
             logger.info("Attempting to fix malformed JSON...")
-            fixed_json = fix_json_with_gemini(client, response.text)
+            fixed_json = _fix_json_with_gemini(client, response.text)
             if fixed_json:
                 logger.info("JSON successfully fixed!")
                 return fixed_json
             else:
-                logger.warning("Failed to fix JSON. Returning raw response.")
-                return {"raw_response": response.text}
+                logger.error("Failed to fix JSON. Returning raw response.")
+                # Consider raising an error instead of returning raw text?
+                # For now, return raw to match previous behavior, but add error context
+                return {"error": "Failed to parse or fix JSON response from Gemini", "raw_response": response.text}
+                
+    except google_exceptions.GoogleAPIError as e:
+        logger.error(f"Gemini API error during analysis: {e}")
+        # Provide more specific feedback if possible
+        if "API key not valid" in str(e):
+             raise ValueError("Invalid Gemini API Key provided.")
+        elif "quota" in str(e).lower():
+             raise ValueError("Gemini API quota exceeded.")
+        else:
+             raise ValueError(f"Gemini API error: {e}")
     except Exception as e:
-        logger.error(f"Error analyzing YouTube video: {str(e)}")
-        raise
+        logger.error(f"Error analyzing {source_type} source: {str(e)}", exc_info=True)
+        raise # Re-raise other exceptions to be caught by main.py
 
-def fix_json_with_gemini(client, response_text: str, max_attempts: int = 3) -> Optional[Dict[str, Any]]:
+    finally:
+        # --- Cleanup ---
+        # Delete the temporary file if it was created
+        if temp_file_to_delete and os.path.exists(temp_file_to_delete):
+            try:
+                # Get the directory containing the temp file
+                temp_dir = os.path.dirname(temp_file_to_delete)
+                shutil.rmtree(temp_dir) # Remove the whole directory
+                logger.info(f"Successfully deleted temporary directory: {temp_dir}")
+            except Exception as e:
+                logger.error(f"Error deleting temporary directory {temp_dir}: {e}")
+        
+        # Delete the file from Gemini Files API if it was uploaded
+        if gemini_file:
+            try:
+                logger.info(f"Deleting Gemini file: {gemini_file.name}")
+                client.files.delete(name=gemini_file.name)
+                logger.info(f"Successfully deleted Gemini file: {gemini_file.name}")
+            except Exception as e:
+                # Log error but don't fail the whole request because of cleanup issue
+                logger.error(f"Error deleting Gemini file {gemini_file.name}: {e}")
+
+
+def _fix_json_with_gemini(client, response_text: str, max_attempts: int = 3) -> Optional[Dict[str, Any]]:
     """
-    Attempts to fix malformed JSON using Gemini Flash model.
+    Attempts to fix malformed JSON using the designated fix model.
     
     Args:
         client: Gemini API client
@@ -126,44 +283,57 @@ def fix_json_with_gemini(client, response_text: str, max_attempts: int = 3) -> O
     Returns:
         dict: Fixed and parsed JSON if successful, None otherwise
     """
-    # Use the lighter Gemini model for fixing
-    fix_model = "gemini-2.0-flash-lite"
-    
     for attempt in range(max_attempts):
         try:
             logger.info(f"Fix attempt {attempt+1}/{max_attempts}...")
             
             # Prompt Gemini to fix only the JSON format
-            fix_prompt = f"""
-            The following JSON is malformed. Fix ONLY the JSON format issues, 
-            not the content. Do not add or remove any data. Return ONLY the 
-            fixed JSON with no additional text or explanations:
+            fix_prompt = f"""The following text is supposed to be a JSON object matching a specific Pydantic schema, but it's malformed. Please fix ONLY the JSON formatting issues (e.g., missing commas, quotes, brackets) and return ONLY the corrected JSON object. Do not add, remove, or change any data values. Do not include any explanatory text or markdown formatting.
+
+Malformed JSON:
+```json
+{response_text}
+```"""
             
-            {response_text}
-            """
-            
+            logger.info(f"Sending malformed JSON to {fix_model} for fixing...")
             # Get fixed JSON from Gemini
             fix_response = client.models.generate_content(
                 model=fix_model,
-                contents=[{"role": "user", "parts": [{"text": fix_prompt}]}]
+                contents=[{"role": "user", "parts": [{"text": fix_prompt}]}],
+                 # Ensure the fix model also returns JSON
+                config=types.GenerateContentConfig(response_mime_type="application/json")
             )
             
             # Extract fixed JSON text and try to parse it
-            fixed_json_text = fix_response.text
+            # The response might still have ```json ... ``` markers, try to remove them
+            fixed_json_text = fix_response.text.strip()
+            if fixed_json_text.startswith("```json"):
+                fixed_json_text = fixed_json_text[7:]
+            if fixed_json_text.endswith("```"):
+                fixed_json_text = fixed_json_text[:-3]
+            fixed_json_text = fixed_json_text.strip()
+
+            logger.info(f"Received potential fix: {fixed_json_text[:500]}...")
             fixed_json = json.loads(fixed_json_text)
             
             # Validate against the Pydantic model
+            logger.info("Validating fixed JSON against Pydantic model...")
+            content_analysis = ContentAnalysis.model_validate(fixed_json)
+            
             content_analysis = ContentAnalysis.model_validate(fixed_json)
             
             # If validation passed, return the fixed JSON
-            logger.info("JSON successfully fixed and validated with Pydantic model")
+            logger.info("Fixed JSON successfully validated with Pydantic model.")
             return fixed_json
             
         except json.JSONDecodeError as e:
-            logger.warning(f"JSON still malformed: {str(e)}")
-        except Exception as e:
-            logger.warning(f"Validation error: {str(e)}")
+            logger.warning(f"Attempt {attempt+1} - JSON still malformed after fix attempt: {str(e)}")
+            response_text = fix_response.text # Use the potentially partially fixed text for the next attempt
+        except Exception as e: # Catches Pydantic validation errors and others
+            logger.warning(f"Attempt {attempt+1} - Validation or other error after fix attempt: {str(e)}")
+            # Don't retry if validation fails, the content is likely wrong
+            break 
             
-    # If we reach here, all attempts failed
-    logger.warning("All fix attempts failed")
+    # If we reach here, all attempts failed or validation failed
+    logger.error("All fix attempts failed or validation failed.")
     return None
