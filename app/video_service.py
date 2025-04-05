@@ -191,11 +191,9 @@ def process_video(source_value: str, source_type: str, language: str = 'en', api
                 types.Content(
                     role="user",
                     parts=[
-                        types.Part.from_file_data(
-                            file_data=types.FileData(
-                                file_uri=gemini_file.uri,
-                                mime_type=gemini_file.mime_type
-                            )
+                        types.Part.from_uri(
+                            file_uri=gemini_file.uri,
+                            mime_type=gemini_file.mime_type # Use mime_type from the uploaded file object
                         ),
                         types.Part.from_text(text=prompt),
                     ],
