@@ -55,9 +55,12 @@ class NamedEntities(BaseModel):
 
 # Main response model
 class ContentAnalysis(BaseModel):
+    original_filename: Optional[str] = None # Original filename if available
+    google_drive_id: Optional[str] = None # Google Drive ID if applicable
     concept_map: List[MainConcept]  # Concept map of the video content
     speakers: List[Speaker]  # Detailed information about each speaker
     named_entities: Optional[NamedEntities] = None # Extracted named entities
+    mermaid: Optional[Dict[str, Any]] = None # Mermaid diagram data
 
 # API Request models
 class VideoAnalysisRequest(BaseModel):

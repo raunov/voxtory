@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 # Create FastAPI app
 app = FastAPI(
-    title="Video Insights API",
+    title="Voxxtory Video Insights API",
     description="API for analyzing YouTube videos using Gemini AI",
     version="1.0.0"
 )
@@ -107,8 +107,8 @@ async def analyze_video(
             source_type = "google_drive"
             source_value = request.google_drive_id
             
-        # Process the video/file
-        result = process_video(
+        # Process the video/file - receives a dict with 'analysis', 'original_filename', 'google_drive_id'
+        processing_output = process_video(
             source_value=source_value,
             source_type=source_type,
             language=request.language,
@@ -116,23 +116,39 @@ async def analyze_video(
             additional_instructions=additional_instructions or ""
         )
         
-        # If the result contains a concept_map, add mermaid data
-        if result and "concept_map" in result:
-            mermaid_data = process_concept_map_to_mermaid_url(result["concept_map"])
-            result["mermaid"] = mermaid_data
+        # Extract the core analysis result
+        analysis_result = processing_output.get('analysis', {}) # Default to empty dict if missing
+        
+        # Check if analysis itself resulted in an error (e.g., JSON fix failed)
+        if isinstance(analysis_result, dict) and 'error' in analysis_result:
+             logger.error(f"Analysis processing failed: {analysis_result.get('error')}")
+             # Return the error from the analysis step
+             return JSONResponse(
+                 status_code=500, # Internal Server Error from analysis failure
+                 content=ApiResponse(status="error", error=analysis_result.get('error', 'Analysis failed')).model_dump()
+             )
+
+        # If the analysis result contains a concept_map, add mermaid data
+        if analysis_result and "concept_map" in analysis_result:
+            mermaid_data = process_concept_map_to_mermaid_url(analysis_result["concept_map"])
+            analysis_result["mermaid"] = mermaid_data
             
         # Format the response according to the request
         if request.format == "json" or request.format == "both":
-            # Keep the JSON result as is
-            response_data = result
+            # Start with the analysis result
+            response_data = analysis_result
             
             # Add markdown if requested
             if request.format == "both":
-                response_data["markdown"] = process_content_analysis_to_markdown(result)
+                response_data["markdown"] = process_content_analysis_to_markdown(analysis_result)
         else:  # markdown only
             # Create a response with just the markdown
-            markdown_content = process_content_analysis_to_markdown(result)
+            markdown_content = process_content_analysis_to_markdown(analysis_result)
             response_data = {"markdown": markdown_content}
+
+        # Add metadata (filename, drive_id) to the response_data regardless of format
+        response_data['original_filename'] = processing_output.get('original_filename')
+        response_data['google_drive_id'] = processing_output.get('google_drive_id')
         
         # Return the result
         return ApiResponse(status="success", data=response_data)

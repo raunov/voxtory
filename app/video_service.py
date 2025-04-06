@@ -40,7 +40,9 @@ def _download_google_drive_file(file_id: str) -> str:
         file_id (str): The Google Drive file ID.
         
     Returns:
-        str: The path to the temporary downloaded file.
+        tuple[str, Optional[str]]: A tuple containing the path to the temporary 
+                                   downloaded file and the original filename 
+                                   (if found in headers, otherwise None).
         
     Raises:
         ValueError: If the download fails (e.g., invalid ID, not public, network error).
@@ -50,6 +52,7 @@ def _download_google_drive_file(file_id: str) -> str:
     temp_dir = tempfile.mkdtemp()
     # Use a generic name first, try to get real name later if possible
     temp_file_path = os.path.join(temp_dir, f"gdrive_{file_id}") 
+    original_filename = None # Initialize filename
 
     try:
         with requests.get(download_url, stream=True, timeout=60) as r:
@@ -57,16 +60,16 @@ def _download_google_drive_file(file_id: str) -> str:
             
             # Try to get filename from headers if available
             content_disposition = r.headers.get('content-disposition')
-            filename = None
             if content_disposition:
                 filenames = re.findall('filename="(.+)"', content_disposition)
                 if filenames:
-                    filename = filenames[0]
+                    original_filename = filenames[0]
                     # Update temp_file_path with actual filename if found
-                    new_temp_file_path = os.path.join(temp_dir, filename)
+                    new_temp_file_path = os.path.join(temp_dir, original_filename)
                     if os.path.exists(temp_file_path): # Should not exist yet, but check
                          os.remove(temp_file_path)
                     temp_file_path = new_temp_file_path
+                    logger.info(f"Found original filename: {original_filename}")
 
             logger.info(f"Downloading to temporary file: {temp_file_path}")
             with open(temp_file_path, 'wb') as f:
@@ -75,7 +78,7 @@ def _download_google_drive_file(file_id: str) -> str:
                     f.write(chunk)
             
             logger.info(f"Successfully downloaded Google Drive file to {temp_file_path}")
-            return temp_file_path
+            return temp_file_path, original_filename # Return path and filename
             
     except requests.exceptions.HTTPError as e:
         # Re-raise HTTPError to be caught specifically by the caller
@@ -124,6 +127,7 @@ def process_video(source_value: str, source_type: str, language: str = 'en', api
     
     gemini_file = None
     temp_file_to_delete = None
+    original_filename = None # Initialize filename variable
     
     try:
         if source_type == "youtube":
@@ -146,8 +150,8 @@ def process_video(source_value: str, source_type: str, language: str = 'en', api
             logger.info("Prepared content using YouTube URI.")
 
         elif source_type == "google_drive":
-            # Download the file first
-            temp_file_path = _download_google_drive_file(source_value)
+            # Download the file first and get filename
+            temp_file_path, original_filename = _download_google_drive_file(source_value)
             temp_file_to_delete = temp_file_path # Mark for deletion
 
             # Ensure the system's mimetypes library knows about .m4a before upload attempt
@@ -228,21 +232,34 @@ def process_video(source_value: str, source_type: str, language: str = 'en', api
         # --- Process Response ---
         try:
             # Try to parse the JSON directly
-            final_result = json.loads(response.text)
+            analysis_result = json.loads(response.text)
             logger.info("Structured JSON received.")
-            return final_result
+            # Return the structured dictionary
+            return {
+                'analysis': analysis_result,
+                'original_filename': original_filename,
+                'google_drive_id': source_value if source_type == 'google_drive' else None
+            }
         except json.JSONDecodeError as e:
             logger.warning(f"JSON parsing error: {str(e)}. Raw response: {response.text[:500]}...") # Log beginning of raw response
             logger.info("Attempting to fix malformed JSON...")
             fixed_json = _fix_json_with_gemini(client, response.text)
             if fixed_json:
                 logger.info("JSON successfully fixed!")
-                return fixed_json
+                # Return the structured dictionary with fixed JSON
+                return {
+                    'analysis': fixed_json,
+                    'original_filename': original_filename,
+                    'google_drive_id': source_value if source_type == 'google_drive' else None
+                }
             else:
-                logger.error("Failed to fix JSON. Returning raw response.")
-                # Consider raising an error instead of returning raw text?
-                # For now, return raw to match previous behavior, but add error context
-                return {"error": "Failed to parse or fix JSON response from Gemini", "raw_response": response.text}
+                logger.error("Failed to fix JSON. Returning raw response with error context.")
+                # Return error structure within the expected dictionary format
+                return {
+                    'analysis': {"error": "Failed to parse or fix JSON response from Gemini", "raw_response": response.text},
+                    'original_filename': original_filename,
+                    'google_drive_id': source_value if source_type == 'google_drive' else None
+                }
                 
     except google_exceptions.GoogleAPIError as e:
         logger.error(f"Gemini API error during analysis: {e}")
