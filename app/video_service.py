@@ -94,9 +94,81 @@ def _download_google_drive_file(file_id: str) -> str:
     except Exception as e:
         # Catch any other unexpected errors during download/saving
         shutil.rmtree(temp_dir) # Clean up temp dir
-        logger.error(f"Unexpected error during Google Drive file download {file_id}: {e}", exc_info=True)
-        # Raise a generic ValueError for unexpected issues
-        raise ValueError(f"An unexpected error occurred while downloading Google Drive file {file_id}.")
+    logger.error(f"Unexpected error during Google Drive file download {file_id}: {e}", exc_info=True)
+    # Raise a generic ValueError for unexpected issues
+    raise ValueError(f"An unexpected error occurred while downloading Google Drive file {file_id}.")
+
+
+def _clean_and_parse_json(text: str) -> Optional[Dict[str, Any]]:
+    """
+    Attempts to clean and parse a JSON string using deterministic methods.
+
+    Args:
+        text (str): The potentially malformed JSON string.
+
+    Returns:
+        Optional[Dict[str, Any]]: Parsed JSON dictionary if successful, None otherwise.
+    """
+    logger.debug("Attempting direct JSON parse...")
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        logger.debug("Direct parse failed. Trying cleaning...")
+
+    # 1. Strip whitespace and common markdown fences
+    cleaned_text = text.strip()
+    if cleaned_text.startswith("```json"):
+        cleaned_text = cleaned_text[7:]
+    elif cleaned_text.startswith("```"):
+         cleaned_text = cleaned_text[3:] # Handle generic code fence start
+
+    if cleaned_text.endswith("```"):
+        cleaned_text = cleaned_text[:-3]
+    cleaned_text = cleaned_text.strip() # Strip again after removing fences
+
+    logger.debug("Attempting parse after stripping fences...")
+    try:
+        return json.loads(cleaned_text)
+    except json.JSONDecodeError:
+        logger.debug("Parse after stripping fences failed. Trying substring extraction...")
+
+    # 2. Extract content between first {/[ and last }/]
+    start_brace = cleaned_text.find('{')
+    start_bracket = cleaned_text.find('[')
+    end_brace = cleaned_text.rfind('}')
+    end_bracket = cleaned_text.rfind(']')
+
+    start = -1
+    end = -1
+
+    # Determine the start index (first '{' or '[')
+    if start_brace != -1 and start_bracket != -1:
+        start = min(start_brace, start_bracket)
+    elif start_brace != -1:
+        start = start_brace
+    elif start_bracket != -1:
+        start = start_bracket
+
+    # Determine the end index (last '}' or ']')
+    if end_brace != -1 and end_bracket != -1:
+        end = max(end_brace, end_bracket)
+    elif end_brace != -1:
+        end = end_brace
+    elif end_bracket != -1:
+        end = end_bracket
+
+    if start != -1 and end != -1 and start < end:
+        extracted_text = cleaned_text[start:end+1]
+        logger.debug("Attempting parse after substring extraction...")
+        try:
+            return json.loads(extracted_text)
+        except json.JSONDecodeError as e_extract:
+            logger.warning(f"Substring extraction parse failed: {e_extract}")
+            return None # Failed all deterministic attempts
+    else:
+        logger.warning("Could not find valid start/end markers for JSON extraction.")
+        return None # Failed all deterministic attempts
+
 
 # --- Main Processing Function ---
 
@@ -228,39 +300,53 @@ def process_video(source_value: str, source_type: str, language: str = 'en', api
                 response_schema=ContentAnalysis
             )
         )
-        
+
         # --- Process Response ---
-        try:
-            # Try to parse the JSON directly
-            analysis_result = json.loads(response.text)
-            logger.info("Structured JSON received.")
-            # Return the structured dictionary
+        analysis_result = None
+        raw_response_text = response.text # Store original response
+
+        # 1. Attempt deterministic cleaning and parsing first
+        logger.info("Attempting deterministic JSON cleaning and parsing...")
+        cleaned_json = _clean_and_parse_json(raw_response_text)
+
+        if cleaned_json:
+            logger.info("Deterministic cleaning successful. Validating with Pydantic...")
+            try:
+                # Validate against the Pydantic model
+                content_analysis = ContentAnalysis.model_validate(cleaned_json)
+                logger.info("Cleaned JSON successfully validated with Pydantic model.")
+                analysis_result = cleaned_json # Use the validated JSON
+            except Exception as pydantic_error: # Catch Pydantic validation errors
+                logger.warning(f"Pydantic validation failed after deterministic cleaning: {pydantic_error}")
+                # Proceed to LLM fix attempt if validation fails
+
+        # 2. If deterministic cleaning/parsing/validation failed, try LLM fix
+        if analysis_result is None:
+            logger.warning("Deterministic JSON processing failed or validation failed. Attempting LLM fix...")
+            fixed_json = _fix_json_with_gemini(client, raw_response_text) # Use original text
+            if fixed_json:
+                # Pydantic validation already happened inside _fix_json_with_gemini
+                logger.info("LLM JSON fix successful and validated!")
+                analysis_result = fixed_json
+            else:
+                logger.error("LLM fix attempt also failed.")
+                # Fall through to return error structure
+
+        # 3. Return result or error
+        if analysis_result:
             return {
                 'analysis': analysis_result,
                 'original_filename': original_filename,
                 'google_drive_id': source_value if source_type == 'google_drive' else None
             }
-        except json.JSONDecodeError as e:
-            logger.warning(f"JSON parsing error: {str(e)}. Raw response: {response.text[:500]}...") # Log beginning of raw response
-            logger.info("Attempting to fix malformed JSON...")
-            fixed_json = _fix_json_with_gemini(client, response.text)
-            if fixed_json:
-                logger.info("JSON successfully fixed!")
-                # Return the structured dictionary with fixed JSON
-                return {
-                    'analysis': fixed_json,
-                    'original_filename': original_filename,
-                    'google_drive_id': source_value if source_type == 'google_drive' else None
-                }
-            else:
-                logger.error("Failed to fix JSON. Returning raw response with error context.")
-                # Return error structure within the expected dictionary format
-                return {
-                    'analysis': {"error": "Failed to parse or fix JSON response from Gemini", "raw_response": response.text},
-                    'original_filename': original_filename,
-                    'google_drive_id': source_value if source_type == 'google_drive' else None
-                }
-                
+        else:
+            logger.error("Failed to obtain valid JSON after all attempts. Returning error.")
+            return {
+                'analysis': {"error": "Failed to parse, fix, or validate JSON response from Gemini", "raw_response": raw_response_text},
+                'original_filename': original_filename,
+                'google_drive_id': source_value if source_type == 'google_drive' else None
+            }
+
     except google_exceptions.GoogleAPIError as e:
         logger.error(f"Gemini API error during analysis: {e}")
         # Provide more specific feedback if possible
@@ -329,37 +415,29 @@ Malformed JSON:
                  # Ensure the fix model also returns JSON
                 config=types.GenerateContentConfig(response_mime_type="application/json")
             )
-            
-            # Extract fixed JSON text and try to parse it
-            # The response might still have ```json ... ``` markers, try to remove them
-            fixed_json_text = fix_response.text.strip()
-            if fixed_json_text.startswith("```json"):
-                fixed_json_text = fixed_json_text[7:]
-            if fixed_json_text.endswith("```"):
-                fixed_json_text = fixed_json_text[:-3]
-            fixed_json_text = fixed_json_text.strip()
 
-            logger.info(f"Received potential fix: {fixed_json_text[:500]}...")
-            fixed_json = json.loads(fixed_json_text)
-            
-            # Validate against the Pydantic model
-            logger.info("Validating fixed JSON against Pydantic model...")
-            content_analysis = ContentAnalysis.model_validate(fixed_json)
-            
-            content_analysis = ContentAnalysis.model_validate(fixed_json)
-            
-            # If validation passed, return the fixed JSON
-            logger.info("Fixed JSON successfully validated with Pydantic model.")
-            return fixed_json
-            
-        except json.JSONDecodeError as e:
-            logger.warning(f"Attempt {attempt+1} - JSON still malformed after fix attempt: {str(e)}")
-            response_text = fix_response.text # Use the potentially partially fixed text for the next attempt
+            # Apply deterministic cleaning to the fix model's output
+            logger.info("Applying deterministic cleaning to the fix model's output...")
+            cleaned_fixed_json = _clean_and_parse_json(fix_response.text)
+
+            if cleaned_fixed_json:
+                logger.info("Cleaned fix output successfully parsed. Validating with Pydantic...")
+                # Validate against the Pydantic model
+                content_analysis = ContentAnalysis.model_validate(cleaned_fixed_json)
+                logger.info("Fixed and cleaned JSON successfully validated with Pydantic model.")
+                return cleaned_fixed_json # Return the validated dictionary
+            else:
+                 logger.warning(f"Attempt {attempt+1} - Could not parse JSON even after cleaning the fix model's output.")
+                 # Continue to next attempt if parsing failed after cleaning
+
+        except json.JSONDecodeError as e: # This might now be less likely if _clean_and_parse_json handles it
+            logger.warning(f"Attempt {attempt+1} - JSON parsing error during fix: {str(e)}")
+            # If parsing fails even after cleaning, continue to the next attempt
         except Exception as e: # Catches Pydantic validation errors and others
             logger.warning(f"Attempt {attempt+1} - Validation or other error after fix attempt: {str(e)}")
-            # Don't retry if validation fails, the content is likely wrong
-            break 
-            
-    # If we reach here, all attempts failed or validation failed
+            # Don't retry if validation fails, the content is likely wrong, exit the loop
+            break
+
+    # If the loop completes without returning a validated JSON, it means all attempts failed
     logger.error("All fix attempts failed or validation failed.")
     return None
