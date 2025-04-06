@@ -224,17 +224,8 @@ def process_video(source_value: str, source_type: str, language: str = 'en', api
             model=base_model,
             contents=contents,
             config=types.GenerateContentConfig(
-                response_mime_type="application/json",
-                response_schema=ContentAnalysis,
-                # Explicitly define property order to potentially improve schema adherence
-                property_ordering=[
-                    "original_filename", 
-                    "google_drive_id", 
-                    "concept_map", 
-                    "speakers", 
-                    "named_entities", 
-                    "mermaid"
-                ]
+                response_mime_type="application/json", 
+                response_schema=ContentAnalysis
             )
         )
         
