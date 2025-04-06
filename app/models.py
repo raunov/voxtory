@@ -53,14 +53,19 @@ class NamedEntities(BaseModel):
     organizations: Optional[List[str]] = None
     terms: Optional[List[str]] = None
 
+# Model for Mermaid Output
+class MermaidOutput(BaseModel):
+    mermaid_code: str = Field(description="The generated Mermaid syntax for the concept map.")
+    mermaid_url: str = Field(description="A URL to view the rendered Mermaid diagram.")
+
 # Main response model
 class ContentAnalysis(BaseModel):
-    original_filename: Optional[str] = None # Original filename if available
-    google_drive_id: Optional[str] = None # Google Drive ID if applicable
-    concept_map: List[MainConcept]  # Concept map of the video content
-    speakers: List[Speaker]  # Detailed information about each speaker
-    named_entities: Optional[NamedEntities] = None # Extracted named entities
-    mermaid: Optional[Dict[str, Any]] = None # Mermaid diagram data
+    original_filename: Optional[str] = Field(default=None, description="Original filename if available from Google Drive.")
+    google_drive_id: Optional[str] = Field(default=None, description="Google Drive ID if the source was Google Drive.")
+    concept_map: List[MainConcept] = Field(description="Hierarchical concept map extracted from the content.")
+    speakers: List[Speaker] = Field(description="Detailed information about each identified speaker and their statements.")
+    named_entities: Optional[NamedEntities] = Field(default=None, description="Extracted named entities (persons, organizations, terms).")
+    mermaid: Optional[MermaidOutput] = Field(default=None, description="Generated Mermaid diagram code and URL for the concept map.")
 
 # API Request models
 class VideoAnalysisRequest(BaseModel):
