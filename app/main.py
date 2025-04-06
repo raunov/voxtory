@@ -1,6 +1,6 @@
 from fastapi import FastAPI, Depends, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 import logging
 import time
 import json
@@ -138,19 +138,32 @@ async def analyze_video(
             # Start with the analysis result
             response_data = analysis_result
             
+            # Prepare data for markdown generation (including metadata)
+            markdown_input_data = analysis_result.copy() # Start with analysis
+            markdown_input_data['original_filename'] = processing_output.get('original_filename')
+            markdown_input_data['google_drive_id'] = processing_output.get('google_drive_id')
+
             # Add markdown if requested
             if request.format == "both":
-                response_data["markdown"] = process_content_analysis_to_markdown(analysis_result)
+                # Pass the combined data to the generator
+                response_data["markdown"] = process_content_analysis_to_markdown(markdown_input_data)
         else:  # markdown only
-            # Create a response with just the markdown
-            markdown_content = process_content_analysis_to_markdown(analysis_result)
-            response_data = {"markdown": markdown_content}
+            # Prepare data for markdown generation (including metadata)
+            markdown_input_data = analysis_result.copy() # Start with analysis
+            markdown_input_data['original_filename'] = processing_output.get('original_filename')
+            markdown_input_data['google_drive_id'] = processing_output.get('google_drive_id')
 
-        # Add metadata (filename, drive_id) to the response_data regardless of format
+            # Return raw markdown content directly
+            # Pass the combined data to the generator
+            markdown_content = process_content_analysis_to_markdown(markdown_input_data)
+            return PlainTextResponse(content=markdown_content, media_type="text/markdown; charset=utf-8")
+
+        # --- This part is now only for format == "json" or format == "both" ---
+        # Add metadata (filename, drive_id) to the response_data (already part of response_data if format=json/both)
         response_data['original_filename'] = processing_output.get('original_filename')
         response_data['google_drive_id'] = processing_output.get('google_drive_id')
-        
-        # Return the result
+
+        # Return the JSON result (either full analysis or analysis + markdown)
         return ApiResponse(status="success", data=response_data)
 
     except requests.exceptions.HTTPError as e:
