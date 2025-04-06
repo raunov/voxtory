@@ -47,10 +47,17 @@ class Speaker(BaseModel):
     voice_description: Optional[str] = None  # Voice description if relevant
     statements: List[Statement]  # All statements made by the speaker with categories
 
+# Model for Named Entities
+class NamedEntities(BaseModel):
+    persons: Optional[List[str]] = None
+    organizations: Optional[List[str]] = None
+    terms: Optional[List[str]] = None
+
 # Main response model
 class ContentAnalysis(BaseModel):
     concept_map: List[MainConcept]  # Concept map of the video content
     speakers: List[Speaker]  # Detailed information about each speaker
+    named_entities: Optional[NamedEntities] = None # Extracted named entities
 
 # API Request models
 class VideoAnalysisRequest(BaseModel):
