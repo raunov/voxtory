@@ -20,7 +20,7 @@ Additional instructions for video content:
 Please follow these instructions carefully:
 
 1. Concept Map Creation:
-   Create a 3-level hierarchical concept map of the video content. For each main concept or topic discussed, include:
+First decide on the main title of the video. Then, based on the content of the video, create a 3-level hierarchical concept map of the video content. For each main concept or topic discussed, include:
    - name of the concept or topic
    - level of concept topic (main concept, subtopic, detail) 
         * Main Concept: the core themes of the video

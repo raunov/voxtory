@@ -58,7 +58,7 @@ async def log_requests(request: Request, call_next):
 async def root():
     """Get API information"""
     return {
-        "name": "Video Insights API",
+        "name": "Voxtory Video Insights API",
         "version": "1.0.0",
         "description": "API for analyzing YouTube videos using Gemini AI",
         "endpoints": {
@@ -146,7 +146,7 @@ async def analyze_video(
             # Add markdown if requested
             if request.format == "both":
                 # Pass the combined data to the generator
-                response_data["markdown"] = process_content_analysis_to_markdown(markdown_input_data)
+                response_data["markdown"] = process_content_analysis_to_markdown(markdown_input_data, video_title=analysis_result.get('title'))
         else:  # markdown only
             # Prepare data for markdown generation (including metadata)
             markdown_input_data = analysis_result.copy() # Start with analysis
@@ -155,7 +155,7 @@ async def analyze_video(
 
             # Return raw markdown content directly
             # Pass the combined data to the generator
-            markdown_content = process_content_analysis_to_markdown(markdown_input_data)
+            markdown_content = process_content_analysis_to_markdown(markdown_input_data, video_title=analysis_result.get('title'))
             return PlainTextResponse(content=markdown_content, media_type="text/markdown; charset=utf-8")
 
         # --- This part is now only for format == "json" or format == "both" ---

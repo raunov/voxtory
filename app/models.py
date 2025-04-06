@@ -60,6 +60,7 @@ class MermaidOutput(BaseModel):
 
 # Main response model
 class ContentAnalysis(BaseModel):
+    title: str = Field(description="Title of the video or audio content.")
     original_filename: Optional[str] = Field(default=None, description="Original filename if available from Google Drive.")
     google_drive_id: Optional[str] = Field(default=None, description="Google Drive ID if the source was Google Drive.")
     concept_map: List[MainConcept] = Field(description="Hierarchical concept map extracted from the content.")
