@@ -42,16 +42,18 @@ def generate_markdown(data: Dict[str, Any], video_title: Optional[str] = None) -
         for i, concept in enumerate(data["concept_map"]):
             # Use H3 for main concepts
             markdown.append(f"### {concept.get('emoji', '')} {concept.get('name', '')}")
-            if i > 0: # Add description for concepts other than the first one
+            # Add description for concepts other than the first one (which is the summary)
+            if i > 0 and concept.get('description'):
                  markdown.append(f"*{concept.get('description', '')}*\n")
-            else: # Add a newline after the first concept's title (already added above)
+            else: # Add a newline after the title/summary
                  markdown.append("") # Ensure newline separation
 
             # Process subconcepts (level 2) - Use H4
             if "subtopics" in concept and concept["subtopics"]:
                 for subconcept in concept["subtopics"]:
                     markdown.append(f"#### {subconcept.get('emoji', '')} {subconcept.get('name', '')}")
-                    markdown.append(f"*{subconcept.get('description', '')}*\n")
+                    if subconcept.get('description'):
+                        markdown.append(f"*{subconcept.get('description', '')}*\n")
                     
                     # Process details (level 3) - Use bullet points
                     if "details" in subconcept and subconcept["details"]:
@@ -101,6 +103,7 @@ def generate_markdown(data: Dict[str, Any], video_title: Optional[str] = None) -
     # --- Add Named Entities ---
     if "named_entities" in data and data["named_entities"]:
         entities = data["named_entities"]
+        # Check if any entity list is not None and not empty
         has_entities = any(entities.get(key) for key in ['terms', 'persons', 'organizations'])
 
         if has_entities:
@@ -113,6 +116,7 @@ def generate_markdown(data: Dict[str, Any], video_title: Optional[str] = None) -
             }
 
             for type_key, (emoji, display_name) in entity_types.items():
+                 # Check if the key exists and the list is not None and not empty
                 if entities.get(type_key):
                     markdown.append(f"### {emoji} {display_name}\n") # Use H3 for entity types
                     for item in entities[type_key]:
