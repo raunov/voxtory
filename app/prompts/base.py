@@ -45,19 +45,16 @@ Please follow these instructions carefully:
    b. Current and past roles and affiliations mentioned
    c. Visual descriptions of the speaker (if mentioned)
    d. Voice description (if relevant)
-   e. Insightful statements uttered by the speaker, categorized as either: facts, predictions, insights, anecdotes, opinions.
-   Include only the statements that are relevant to the speaker's role and expertise. Categorize each statement accordingly.
+   e. up to 10 most important statements uttered by the speaker, categorized as either: facts, predictions, insights, anecdotes, opinions.
+   Include only the statements that are relevant to the speaker's role and expertise. Do not include generic or irrelevant.
 
 4. Named Entity Recognition (NER):
    Identify and list the following entities mentioned throughout the video content:
    a. Persons: Names of individuals mentioned (excluding the main speakers already detailed in the dossiers above).
    b. Organizations: Names of companies, institutions, groups, etc.
-   c. Specific Terms: Key technical terms, concepts, or jargon relevant to the discussion that are not already part of the concept map structure.
+   c. Specific Terms: Key technical terms, concepts, or jargon relevant to the discussion that are not already part of the concept map structure. Only inlcude terms that are relevant to the video content and not generic terms.
    Present these as simple lists under their respective categories.
 
-If certain information is not available, omit those fields entirely.
-Ensure that your final output contains only the information requested, without any additional explanation or commentary.
-Remember to focus on extracting and presenting factual information from the video/audio. Do not include any speculative or inferred information.
 Generate all output in the language specified by this code: {language_code}
 """
     
