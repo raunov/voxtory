@@ -51,7 +51,7 @@ def generate_markdown(data: Dict[str, Any], video_title: Optional[str] = None) -
             # Process subconcepts (level 2) - Use H4
             if "subtopics" in concept and concept["subtopics"]:
                 for subconcept in concept["subtopics"]:
-                    markdown.append(f"#### {subconcept.get('emoji', '')} {subconcept.get('name', '')}")
+                    markdown.append(f"**{subconcept.get('emoji', '')} {subconcept.get('name', '')}**")
                     if subconcept.get('description'):
                         markdown.append(f"*{subconcept.get('description', '')}*\n")
                     
