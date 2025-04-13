@@ -292,45 +292,58 @@ def process_video(source_value: str, source_type: str, language: str = 'en', api
             
         # --- Generate Content ---
         logger.info(f"Getting structured analysis with model {base_model}...")
-        response = client.models.generate_content(
-            model=base_model,
-            contents=contents,
-            config=types.GenerateContentConfig(
-                response_mime_type="application/json", 
-                response_schema=ContentAnalysis
+        response = None # Initialize response
+        try:
+            logger.info(">>> Calling client.models.generate_content...")
+            response = client.models.generate_content(
+                model=base_model,
+                contents=contents,
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json", 
+                    response_schema=ContentAnalysis
+                )
             )
-        )
+        finally:
+            # This log will execute even if generate_content raises an error
+            logger.info("<<< client.models.generate_content call finished.")
 
-        # --- Process Response ---
-        analysis_result = None
-        raw_response_text = response.text # Store original response
+        # Check if response was actually obtained before proceeding
+        if response is None:
+            logger.error("Failed to get a response from generate_content (it might have raised an error).")
+            # Handle the error appropriately, maybe re-raise or return an error structure
+            # For now, let's ensure the existing error path is taken
+            analysis_result = None # Ensure we fall into the error handling below
+        else:
+            # --- Process Response ---
+            analysis_result = None
+            raw_response_text = response.text # Store original response
 
-        # 1. Attempt deterministic cleaning and parsing first
-        logger.info("Attempting deterministic JSON cleaning and parsing...")
-        cleaned_json = _clean_and_parse_json(raw_response_text)
+            # 1. Attempt deterministic cleaning and parsing first
+            logger.info("Attempting deterministic JSON cleaning and parsing...")
+            cleaned_json = _clean_and_parse_json(raw_response_text)
 
-        if cleaned_json:
-            logger.info("Deterministic cleaning successful. Validating with Pydantic...")
-            try:
-                # Validate against the Pydantic model
-                content_analysis = ContentAnalysis.model_validate(cleaned_json)
-                logger.info("Cleaned JSON successfully validated with Pydantic model.")
-                analysis_result = cleaned_json # Use the validated JSON
-            except Exception as pydantic_error: # Catch Pydantic validation errors
-                logger.warning(f"Pydantic validation failed after deterministic cleaning: {pydantic_error}")
-                # Proceed to LLM fix attempt if validation fails
+            if cleaned_json:
+                logger.info("Deterministic cleaning successful. Validating with Pydantic...")
+                try:
+                    # Validate against the Pydantic model
+                    content_analysis = ContentAnalysis.model_validate(cleaned_json)
+                    logger.info("Cleaned JSON successfully validated with Pydantic model.")
+                    analysis_result = cleaned_json # Use the validated JSON
+                except Exception as pydantic_error: # Catch Pydantic validation errors
+                    logger.warning(f"Pydantic validation failed after deterministic cleaning: {pydantic_error}")
+                    # Proceed to LLM fix attempt if validation fails
 
-        # 2. If deterministic cleaning/parsing/validation failed, try LLM fix
-        if analysis_result is None:
-            logger.warning("Deterministic JSON processing failed or validation failed. Attempting LLM fix...")
-            fixed_json = _fix_json_with_gemini(client, raw_response_text) # Use original text
-            if fixed_json:
-                # Pydantic validation already happened inside _fix_json_with_gemini
-                logger.info("LLM JSON fix successful and validated!")
-                analysis_result = fixed_json
-            else:
-                logger.error("LLM fix attempt also failed.")
-                # Fall through to return error structure
+            # 2. If deterministic cleaning/parsing/validation failed, try LLM fix
+            if analysis_result is None:
+                logger.warning("Deterministic JSON processing failed or validation failed. Attempting LLM fix...")
+                fixed_json = _fix_json_with_gemini(client, raw_response_text) # Use original text
+                if fixed_json:
+                    # Pydantic validation already happened inside _fix_json_with_gemini
+                    logger.info("LLM JSON fix successful and validated!")
+                    analysis_result = fixed_json
+                else:
+                    logger.error("LLM fix attempt also failed.")
+                    # Fall through to return error structure
 
         # 3. Return result or error
         if analysis_result:
