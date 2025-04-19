@@ -1,6 +1,6 @@
 import json, re, os, requests, tempfile, shutil, mimetypes, time
 from google import genai
-from google.genai import types
+from google.genai import types, errors as google_genai_errors # Import errors
 from google.api_core import exceptions as google_exceptions
 import logging
 from app.prompts.base import get_language_prompt
@@ -290,32 +290,52 @@ def process_video(source_value: str, source_type: str, language: str = 'en', api
         #     logger.warning(f"Token counting failed: {str(e)}")
         #     logger.info("Continuing with analysis...")
             
-        # --- Generate Content ---
+        # --- Generate Content with Retry Logic ---
         logger.info(f"Getting structured analysis with model {base_model}...")
-        response = None # Initialize response
-        try:
-            logger.info(">>> Calling client.models.generate_content...")
-            response = client.models.generate_content(
-                model=base_model,
-                contents=contents,
-                config=types.GenerateContentConfig(
-                    response_mime_type="application/json", 
-                    response_schema=ContentAnalysis
-                )
-            )
-        finally:
-            # This log will execute even if generate_content raises an error
-            logger.info("<<< client.models.generate_content call finished.")
+        response = None
+        max_retries = 3
+        initial_delay = 10 # seconds
 
-        # Check if response was actually obtained before proceeding
-        if response is None:
-            logger.error("Failed to get a response from generate_content (it might have raised an error).")
-            # Handle the error appropriately, maybe re-raise or return an error structure
-            # For now, let's ensure the existing error path is taken
-            analysis_result = None # Ensure we fall into the error handling below
-        else:
-            # --- Process Response ---
-            analysis_result = None
+        for attempt in range(max_retries):
+            try:
+                logger.info(f">>> Calling client.models.generate_content (Attempt {attempt + 1}/{max_retries})...")
+                response = client.models.generate_content(
+                    model=base_model,
+                    contents=contents,
+                    config=types.GenerateContentConfig(
+                        response_mime_type="application/json",
+                        response_schema=ContentAnalysis
+                    )
+                )
+                logger.info("<<< client.models.generate_content call successful.")
+                break # Exit loop on success
+            except google_genai_errors.ServerError as e:
+                logger.warning(f"Attempt {attempt + 1} failed with ServerError: {e}")
+                # Check if it's a 503 error and if we have retries left
+                # Note: google.api_core.exceptions.ServiceUnavailable might also be relevant,
+                # but the traceback showed google.genai.errors.ServerError
+                # We access the status code via e.args if available, or check message
+                status_code = getattr(e, 'status_code', None) # Prefer status_code if present
+                is_503 = status_code == 503 or "503" in str(e) # Check status code or message
+
+                if is_503 and attempt < max_retries - 1:
+                    delay = initial_delay * (2 ** attempt)
+                    logger.info(f"Retrying after {delay} seconds due to 503 error...")
+                    time.sleep(delay)
+                else:
+                    logger.error(f"Final attempt failed or non-retryable ServerError encountered.")
+                    raise # Re-raise the last exception if retries exhausted or not 503
+            except Exception as e: # Catch other potential errors during the call
+                 logger.error(f"Unexpected error during generate_content call: {e}", exc_info=True)
+                 raise # Re-raise other critical errors immediately
+            finally:
+                 # This log might be less useful here now with the loop logging
+                 # logger.info("<<< client.models.generate_content call finished.")
+                 pass # Keep finally for structure if needed later
+
+        # --- Process Response ---
+        analysis_result = None
+        if response: # Only proceed if response was successfully obtained
             raw_response_text = response.text # Store original response
 
             # 1. Attempt deterministic cleaning and parsing first
