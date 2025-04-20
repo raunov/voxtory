@@ -46,6 +46,7 @@ First decide on the main title of the video. Then, based on the content of the v
    c. Visual descriptions of the speaker (if mentioned)
    d. Voice description (if relevant)
    e. up to 10 most important statements uttered by the speaker, categorized as either: facts, predictions, insights, anecdotes, opinions.
+      For each statement, include an approximate timestamp (in format MM:SS) when it was said in the video.
    Include only the statements that are relevant to the speaker's role and expertise. Do not include generic or irrelevant.
 
 4. Named Entity Recognition (NER):

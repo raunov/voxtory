@@ -370,14 +370,16 @@ def process_video(source_value: str, source_type: str, language: str = 'en', api
             return {
                 'analysis': analysis_result,
                 'original_filename': original_filename,
-                'google_drive_id': source_value if source_type == 'google_drive' else None
+                'google_drive_id': source_value if source_type == 'google_drive' else None,
+                'youtube_url': source_value if source_type == 'youtube' else None  # Add YouTube URL
             }
         else:
             logger.error("Failed to obtain valid JSON after all attempts. Returning error.")
             return {
                 'analysis': {"error": "Failed to parse, fix, or validate JSON response from Gemini", "raw_response": raw_response_text},
                 'original_filename': original_filename,
-                'google_drive_id': source_value if source_type == 'google_drive' else None
+                'google_drive_id': source_value if source_type == 'google_drive' else None,
+                'youtube_url': source_value if source_type == 'youtube' else None  # Add YouTube URL
             }
 
     except google_exceptions.GoogleAPIError as e:

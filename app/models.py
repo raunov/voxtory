@@ -38,6 +38,7 @@ class TranscriptEntry(BaseModel):
 class Statement(BaseModel):
     text: str
     category: Literal["fact", "prediction", "insight", "anecdote", "opinion", "explanation"]
+    timestamp: Optional[str] = None  # Add timestamp field (in MM:SS format)
 
 # Enhanced speaker model
 class Speaker(BaseModel):

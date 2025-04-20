@@ -1,6 +1,48 @@
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 from app.models import ContentAnalysis, MainConcept, Speaker, Statement
 import urllib.parse # Import for URL encoding
+import re
+
+def _create_youtube_timestamp_link(url: str, timestamp: str) -> str:
+    """
+    Create a YouTube link with timestamp.
+    
+    Args:
+        url (str): YouTube URL
+        timestamp (str): Timestamp in MM:SS format
+        
+    Returns:
+        str: YouTube URL with timestamp parameter
+    """
+    try:
+        # Convert MM:SS to seconds
+        parts = timestamp.split(':')
+        if len(parts) == 2:
+            minutes, seconds = int(parts[0]), int(parts[1])
+            total_seconds = minutes * 60 + seconds
+            
+            # Handle different YouTube URL formats
+            if 'youtube.com/watch' in url:
+                # Standard YouTube URL
+                if '?' in url:
+                    return f"{url}&t={total_seconds}"
+                else:
+                    return f"{url}?t={total_seconds}"
+            elif 'youtu.be/' in url:
+                # Shortened YouTube URL
+                if '?' in url:
+                    return f"{url}&t={total_seconds}"
+                else:
+                    return f"{url}?t={total_seconds}"
+            else:
+                # Unknown format, return original URL
+                return url
+        else:
+            # Invalid timestamp format
+            return url
+    except (ValueError, IndexError):
+        # Error parsing timestamp
+        return url
 
 def generate_markdown(data: Dict[str, Any], video_title: Optional[str] = None) -> str:
     """
@@ -19,6 +61,9 @@ def generate_markdown(data: Dict[str, Any], video_title: Optional[str] = None) -
     """
     markdown = []
     
+    # Store YouTube URL for timestamp links
+    youtube_url = data.get('youtube_url', '')
+    
     # Add title
     title = video_title or "Video Analysis"
     markdown.append(f"# 📊 {title}\n")
@@ -28,6 +73,13 @@ def generate_markdown(data: Dict[str, Any], video_title: Optional[str] = None) -
         first_concept = data["concept_map"][0]
         if first_concept and 'description' in first_concept:
              markdown.append(f"*{first_concept.get('description', '')}*\n")
+    
+    # --- Add Introduction with speaker names ---
+    if "speakers" in data and data["speakers"]:
+        speaker_names = [s.get('full_name', '') for s in data["speakers"] if s.get('full_name')]
+        if speaker_names:
+            speakers_text = ", ".join(speaker_names)
+            markdown.append(f"*Arutelu, kus osalevad {speakers_text}.*\n")
     
     # Add Mermaid diagram if available
     if "mermaid" in data and "mermaid_url" in data["mermaid"]:
@@ -74,10 +126,15 @@ def generate_markdown(data: Dict[str, Any], video_title: Optional[str] = None) -
                 for statement in speaker["statements"]:
                     category = statement.get("category", "unknown")
                     text = statement.get("text")
+                    timestamp = statement.get("timestamp")
                     if text: # Only add if text exists
                         if category not in all_statements_by_category:
                             all_statements_by_category[category] = []
-                        all_statements_by_category[category].append({"speaker": speaker_name, "text": text})
+                        all_statements_by_category[category].append({
+                            "speaker": speaker_name, 
+                            "text": text,
+                            "timestamp": timestamp
+                        })
 
         # Define category order and display names/emojis
         category_order = ['insight', 'opinion', 'fact', 'explanation', 'anecdote', 'prediction', 'unknown']
@@ -97,7 +154,16 @@ def generate_markdown(data: Dict[str, Any], video_title: Optional[str] = None) -
                 emoji, display_name = category_display.get(category_key, ("•", category_key.title()))
                 markdown.append(f"### {emoji} {display_name}\n") # Use H3 for category titles
                 for stmt in all_statements_by_category[category_key]:
-                    markdown.append(f"- **{stmt['speaker']}:** \"{stmt['text']}\"")
+                    # Add timestamp with YouTube link if available
+                    if 'timestamp' in stmt and stmt['timestamp'] and youtube_url:
+                        timestamp_link = _create_youtube_timestamp_link(youtube_url, stmt['timestamp'])
+                        markdown.append(f"- **{stmt['speaker']}** ([{stmt['timestamp']}]({timestamp_link})): \"{stmt['text']}\"")
+                    elif 'timestamp' in stmt and stmt['timestamp']:
+                        # Non-YouTube video with timestamp
+                        markdown.append(f"- **{stmt['speaker']}** ({stmt['timestamp']}): \"{stmt['text']}\"")
+                    else:
+                        # No timestamp available
+                        markdown.append(f"- **{stmt['speaker']}:** \"{stmt['text']}\"")
                 markdown.append("") # Add newline after each category list
 
     # --- Add Named Entities ---
@@ -125,6 +191,38 @@ def generate_markdown(data: Dict[str, Any], video_title: Optional[str] = None) -
                         link = f"https://www.google.com/search?q={search_query}"
                         markdown.append(f"- [{item}]({link})")
                     markdown.append("") # Add newline after each entity list
+
+    # --- Add Conclusion Section with Key Insights ---
+    if "speakers" in data and data["speakers"]:
+        # Extract key insights from statements
+        key_insights = []
+        for speaker in data["speakers"]:
+            speaker_name = speaker.get('full_name', 'Unknown Speaker')
+            if "statements" in speaker and speaker["statements"]:
+                for statement in speaker["statements"]:
+                    if statement.get("category") == "insight":
+                        key_insights.append({
+                            "speaker": speaker_name,
+                            "text": statement.get("text", ""),
+                            "timestamp": statement.get("timestamp")
+                        })
+        
+        if key_insights and len(key_insights) > 0:
+            markdown.append("## 📝 Kokkuvõte\n")
+            markdown.append("Peamised tähelepanekud:\n")
+            # Limit to top 3 insights
+            for i, insight in enumerate(key_insights[:3]):
+                # Add timestamp with YouTube link if available
+                if 'timestamp' in insight and insight['timestamp'] and youtube_url:
+                    timestamp_link = _create_youtube_timestamp_link(youtube_url, insight['timestamp'])
+                    markdown.append(f"- **{insight['speaker']}** ([{insight['timestamp']}]({timestamp_link})): {insight['text']}")
+                elif 'timestamp' in insight and insight['timestamp']:
+                    # Non-YouTube video with timestamp
+                    markdown.append(f"- **{insight['speaker']}** ({insight['timestamp']}): {insight['text']}")
+                else:
+                    # No timestamp available
+                    markdown.append(f"- **{insight['speaker']}:** {insight['text']}")
+            markdown.append("")
 
     # --- Add Source Information ---
     original_filename = data.get('original_filename')
